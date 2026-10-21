@@ -165,6 +165,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - The budget stop lets another member make one more paid call, leaves a parked agent waiting, or records the stop late (`test_crossing_the_token_budget_stops_the_swarm_in_the_same_block_and_refuses_every_later_call`, `test_the_first_response_crossing_the_budget_refuses_every_other_first_call`).
 - A member in the middle of a long tool call when the stop is decided makes another model call, or is cancelled instead of released (`test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_without_another_model_call`).
 - A send whose response was in flight when the stop was decided is lost or delivered (`test_a_send_after_the_stop_is_decided_is_sent_then_undelivered_with_the_stopped_reply`).
+- A compact request still pending when the stop is decided makes a paid summary call after `swarm_stopping` (`test_a_compact_request_pending_at_the_stop_makes_no_summary_call_and_records_no_compaction`).
 - The trim records `history_trimmed` for a model call that the observer then refuses after the stop, so the record shows work on a call that was never sent (`test_a_model_call_refused_after_the_stop_records_no_history_trimmed`).
 - A model error that a retry middleware retries is not recorded, or the observer's hook changes the retry decision; AgentSwarm installs no retry, so the test appends one (`test_a_retried_model_error_records_model_error_and_the_agent_keeps_working`).
 - A provider that reports no usage crashes the observer or trips the budget (`test_missing_usage_records_zeros_and_never_trips_the_budget`).
@@ -174,7 +175,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 **Tool outcomes and the trim**
 - A long history is sent untrimmed, or the trim records the wrong count (`test_a_trimmed_history_records_history_trimmed_with_the_dropped_count`).
 - A result over the cap reaches the model uncut, or its truncation is unrecorded or off by one at the cap (`test_a_tool_result_over_the_cap_records_its_omitted_chars_and_one_at_the_cap_records_nothing`).
-- Two agents writing one file are not reported as a collision, or a relative `patch_file` path is a different key (`test_two_agents_writing_one_file_record_file_changed_naming_the_previous_writer`); a refused write still reports a change (`test_a_refused_write_records_no_file_changed`).
+- Two agents writing one file are not reported as a collision, or a relative `patch_file` path is a different key (`test_two_agents_writing_one_file_record_file_changed_naming_the_previous_writer`); an agent rewriting its own file names itself as the peer (`test_one_agent_writing_one_file_twice_records_file_changed_with_no_peer_both_times`); a refused write still reports a change (`test_a_refused_write_records_no_file_changed`).
 - A non-zero exit or a bash timeout is silent, or a zero exit is reported (`test_a_non_zero_exit_and_a_timeout_record_command_failed_and_a_zero_exit_records_none`).
 
 **Compaction**
@@ -184,6 +185,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - A failed summary call drops the history, fails the member, or swallows the mail (`test_a_failed_summary_call_keeps_the_history_delivers_mail_and_the_member_runs_on`).
 - A blank summary aborts the compaction; nothing older still makes a paid call (`test_a_blank_summary_still_compacts_with_the_prefix_only`, `test_compact_with_nothing_older_makes_no_side_call_and_no_event`).
 - A side call that crosses the budget loses its compaction or lets the member call the model again (`test_a_summary_call_crossing_the_budget_completes_the_compaction_then_releases`).
+- The summary side call's tokens never reach the member's `tokens_used` (`test_the_summary_call_tokens_are_added_to_the_members_tokens_used`).
 - A size estimate that reads only `content` counts a Gemini member's `parts` history, and an OpenAI history whose text sits in `tool_calls`, as almost empty, so neither ever compacts and the trim becomes the mechanism (`test_a_gemini_member_at_the_trigger_compacts_its_parts_history_through_one_summary_call`, `test_an_openai_history_of_write_calls_only_compacts_at_the_trigger`).
 - A prompt whose uncompactable part (system prompt, tools, goal) keeps the measured context at the trigger makes every tool iteration pay for another summary of the summary; or a fix makes a `compact` request wait for growth too (`test_automatic_compaction_waits_for_a_target_of_new_history_and_a_compact_request_does_not`).
 
@@ -222,14 +224,16 @@ The S4 review of the v2 implementation (`docs/spec/agent-swarm-v2/review.md`, sp
 - **R-9:** the trim recorded `history_trimmed` for a call refused after the stop. Test: `test_a_model_call_refused_after_the_stop_records_no_history_trimmed`.
 - **R-6:** automatic compaction had no hysteresis, so a large goal made every iteration pay for a summary. Test: `test_automatic_compaction_waits_for_a_target_of_new_history_and_a_compact_request_does_not`.
 
+It also found three lines the spec pins that could be deleted with the pack still passing (R-7). Each now has a test that passes on the shipped code and fails on its mutant: `compact_while_stopping` (`test_a_compact_request_pending_at_the_stop_makes_no_summary_call_and_records_no_compaction`), `self_writer_as_peer` (`test_one_agent_writing_one_file_twice_records_file_changed_with_no_peer_both_times`), and `side_call_tokens_not_added` (`test_the_summary_call_tokens_are_added_to_the_members_tokens_used`).
+
 ## Test Suite Map
 
 - `test_agent_swarm_acceptance.py` covers the §4 snippet as written, three members created and started in order with the web-search tool, a swarm that ends after one turn each, and the goal reaching every call verbatim. Start here for a caller-visible regression.
 - `test_agent_swarm_messaging.py` covers mid-turn delivery, batching, wakes after a reply or `isDone`, mail waiting at turn end, mutual messages, the lost-wake-up race, self-messages, the two refusals, and text fidelity.
 - `test_agent_swarm_lifecycle.py` covers the turn budget and `wake_refused`, the time limit and its labels, failures by provider error, tool exception and middleware abort, concurrent and repeated runs, cancellation, callback containment, the event outbox, and `tool_called` events.
-- `test_agent_swarm_stop.py` covers `model_called`, `model_error`, the token budget stop, refused calls after the stop and the trim they no longer record, sends in flight at the stop, and missing usage.
-- `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` and `command_failed`.
-- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, an OpenAI history of write calls only), the wait for target-sized growth before a repeat automatic compaction, the summary call, failures and blank summaries, and a side call that crosses the budget.
+- `test_agent_swarm_stop.py` covers `model_called`, `model_error`, the token budget stop, refused calls after the stop and the trim they no longer record, no summary call for a compact request pending at the stop, sends in flight at the stop, and missing usage.
+- `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` (including one agent rewriting its own file) and `command_failed`.
+- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, an OpenAI history of write calls only), the wait for target-sized growth before a repeat automatic compaction, the summary call and its tokens, failures and blank summaries, and a side call that crosses the budget.
 - `test_agent_swarm_settings.py` covers the lib settings record: import identity, members without prompts, web-search settings, the generous limits, defaults, key secrecy and the layering rule.
 - `test_agent_swarm_workplace.py` covers folder creation and preservation, `workplace_prepared`, a folder shared across runs, refused workplaces, path escapes, and goal checks.
 - `test_agent_swarm_contract.py` covers exports, enums, the prompt family, the runtime registry and refusal, the exact tools, schemas and system prompt, settings validation and key secrecy, record validation for twenty-four kinds, and the complexity budget.

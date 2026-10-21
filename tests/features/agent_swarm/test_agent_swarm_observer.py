@@ -1,9 +1,9 @@
 """FILE: tests/features/agent_swarm/test_agent_swarm_observer.py
 
-PURPOSE: Pins what the swarm observer records about each member's own work. A history over the provider-boundary cap records one history_trimmed per model call the trim changed, with the exact number of messages that call did not send. A tool result longer than the result cap records tool_result_truncated with the exact omitted count, and one exactly at the cap records nothing. Two agents writing one file record file_changed with the same absolute path, naming the previous writer when it was another agent, through write_text and patch_file alike; a refused write records nothing. A bash command that exits non-zero, or runs out of time, records command_failed, and a zero exit records none.
-ROLE IN CODEBASE: Observation layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md AC-11, AC-12, AC-13, AC-14; EC-15, EC-16, EC-17, EC-18, EC-19, EC-20; INV-24, INV-25, INV-26, INV-27, INV-36). Exercises AgentSwarmTrimMiddleware, AgentSwarmObserverMiddleware.after_tool_call, and AgentSwarmRuntime.record_history_trim and record_tool_outcome, through real files, real bash and the real loop.
+PURPOSE: Pins what the swarm observer records about each member's own work. A history over the provider-boundary cap records one history_trimmed per model call the trim changed, with the exact number of messages that call did not send. A tool result longer than the result cap records tool_result_truncated with the exact omitted count, and one exactly at the cap records nothing. Two agents writing one file record file_changed with the same absolute path, naming the previous writer when it was another agent, through write_text and patch_file alike, and one agent writing a file twice names no peer; a refused write records nothing. A bash command that exits non-zero, or runs out of time, records command_failed, and a zero exit records none.
+ROLE IN CODEBASE: Observation layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md AC-11, AC-12, AC-13, AC-14; EC-15, EC-16, EC-17, EC-18, EC-19, EC-20; INV-24, INV-25, INV-26, INV-27, INV-36; S4 review R-7). Exercises AgentSwarmTrimMiddleware, AgentSwarmObserverMiddleware.after_tool_call, and AgentSwarmRuntime.record_history_trim and record_tool_outcome, through real files, real bash and the real loop.
 ARCHITECTURE NOTE: Expected counts are computed from the run itself, never from the trim's internals: the loop's untrimmed history after k single-tool steps holds 2k messages, so what a trimmed call did not send is 2k minus the messages it carried. Sizes come from the constants and the SDK's four-characters-per-token estimate. Bash limits are lowered by monkeypatching the bash module's own globals, which it reads at call time.
-FUNCTION INVENTORY: _next_own (the next event of the same agent); test_each_model_call_the_trim_changes_records_history_trimmed_with_its_exact_drop (AC-11, EC-20, INV-24, INV-36); test_a_tool_result_over_the_cap_records_its_exact_omitted_count_and_one_at_the_cap_records_none (AC-12, EC-19, INV-25); test_two_agents_writing_one_file_record_file_changed_naming_the_previous_writer (AC-13, EC-16, INV-26); test_a_refused_write_records_no_file_changed (EC-15); test_bash_records_command_failed_for_a_non_zero_exit_and_none_for_zero (AC-14, EC-17, EC-18, INV-27); test_a_bash_command_that_runs_out_of_time_records_command_failed_timeout (AC-14, INV-27).
+FUNCTION INVENTORY: _next_own (the next event of the same agent); test_each_model_call_the_trim_changes_records_history_trimmed_with_its_exact_drop (AC-11, EC-20, INV-24, INV-36); test_a_tool_result_over_the_cap_records_its_exact_omitted_count_and_one_at_the_cap_records_none (AC-12, EC-19, INV-25); test_two_agents_writing_one_file_record_file_changed_naming_the_previous_writer (AC-13, EC-16, INV-26); test_one_agent_writing_one_file_twice_records_file_changed_with_no_peer_both_times (INV-26, R-7); test_a_refused_write_records_no_file_changed (EC-15); test_bash_records_command_failed_for_a_non_zero_exit_and_none_for_zero (AC-14, EC-17, EC-18, INV-27); test_a_bash_command_that_runs_out_of_time_records_command_failed_timeout (AC-14, INV-27).
 COMMON MODIFICATION PATTERNS: A new derived event gets one test that makes the tool produce it through a real call and asserts that it is the next event of the same agent after that tool's tool_called.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not mock the trim, the tools or bash; the counts must come from the real pipeline. 3. Do not write a bash command that can outlive its test: the timeout case loops on the shell's own SECONDS counter, so even where only the launcher is killed (Windows) it stops by itself within a few seconds.
 KNOWN EDGE CASES: read_lines returns a one-line file's text unchanged, so a file with no newline gives a tool output of exactly its length. Other agents' events may fall between a tool_called and its derived event, so the test follows the same agent's next event.
@@ -143,6 +143,28 @@ async def test_two_agents_writing_one_file_record_file_changed_naming_the_previo
         tool = of_kind(result.events, TOOL_CALLED, change.agent)
         assert any(_next_own(result.events, event) == change for event in tool), change
     assert_event_invariants(result, names, max_turns=swarm.settings.max_turns, log=log)
+    scripted.assert_complete()
+
+
+@pytest.mark.asyncio
+async def test_one_agent_writing_one_file_twice_records_file_changed_with_no_peer_both_times(tmp_path: Path) -> None:
+    """INV-26 (S4 R-7): builder writes notes.md with write_text twice and no other agent writes it; both file_changed events carry the same absolute path of that file and peer "", because the previous writer at the second write is builder itself, and a peer names only a different agent."""
+    log = EventLog()
+    scripted = ScriptedSwarm(
+        {
+            "builder": [tool_call("write_text", {"path": "notes.md", "content": "# Notes\nTODO\n"}), tool_call("write_text", {"path": "notes.md", "content": "# Notes\nDONE\n"}), reply("Builder done.")],
+            "tester": [reply("Tester done.")],
+        }
+    )
+    swarm = build_swarm(tmp_path, NAMES, on_event=log.callback)
+    with scripted.install():
+        result = await run_swarm(swarm)
+
+    changes = of_kind(result.events, FILE_CHANGED)
+    assert [(event.agent, event.peer) for event in changes] == [("builder", ""), ("builder", "")], describe(result.events)
+    assert len({event.path for event in changes}) == 1 and Path(changes[0].path).resolve() == (workplace_path(tmp_path) / "notes.md").resolve()
+    assert (workplace_path(tmp_path) / "notes.md").read_text(encoding="utf-8") == "# Notes\nDONE\n"
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 

@@ -44,9 +44,9 @@ The pack covers AC-1 to AC-25 of `docs/spec/agent-swarm-v2/spec.md`, and `docs/s
   - a raising, slow or cancelled `on_event`;
   - concurrent flushes, and where the event clock starts;
   - `tool_called` events.
-- `test_agent_swarm_stop.py` covers `model_called` token counts, `model_error` before a test-installed retry, the token budget stop, calls and sends in flight at the stop, no `history_trimmed` for a call refused after the stop, and missing usage.
-- `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` and `command_failed`.
-- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, and an OpenAI history of write calls only), the wait for target-sized growth before a repeat automatic compaction, the summary side call, failed and blank summaries, and a side call that reaches the budget.
+- `test_agent_swarm_stop.py` covers `model_called` token counts, `model_error` before a test-installed retry, the token budget stop, calls and sends in flight at the stop, no `history_trimmed` for a call refused after the stop, no summary call for a compact request pending at the stop, and missing usage.
+- `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` (another agent's earlier write named as the peer, one's own named as none) and `command_failed`.
+- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage, a Gemini `parts` history, and an OpenAI history of write calls only), the wait for target-sized growth before a repeat automatic compaction, the summary side call and its tokens in the member's `tokens_used`, failed and blank summaries, and a side call that reaches the budget.
 - `test_agent_swarm_settings.py` covers the lib settings record: one class under every import path, members without prompts, web-search settings, the limits, key secrecy, and the layering rule.
 - `test_agent_swarm_workplace.py` covers:
   - creating the workplace and keeping its files across runs;
@@ -75,3 +75,4 @@ From the repository root: `PYTHONPATH=$(pwd) python -m pytest tests/features/age
 - 2026-10-16 - Pack added red, ahead of the implementation, from spec r3 (S2 test author).
 - 2026-10-17 - S4 gap tests (mutants M2, M7, M21, M22) and spec r4 regression tests (EC-39, R-2, R-11, R-8) added; the r4 ones stay red until S5.
 - 2026-10-20 - Pack rewritten red for agent-swarm-v2 spec r3 (S2 test author): four new modules (settings, stop, observer, compaction), 268 cases.
+- 2026-10-21 - S4 review amendment for spec r4 (S2 test author): `runtime.py` gets a 500-line budget (R-3); a Gemini response shape in the scripted runner; seven new tests, 275 cases. The R-2 (two), R-6 and R-9 tests stay red until the S5 repair; the three R-7 tests pass and kill their mutants.
