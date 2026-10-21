@@ -98,13 +98,13 @@ after the table was last checked.
 
 | Provider | Wire form | Sources |
 |---|---|---|
-| openai | `{"reasoning": {"effort": "<value>"}}` | https://developers.openai.com/api/docs/guides/reasoning.md and each model page under https://developers.openai.com/api/docs/models/; `gpt-5.6` is an alias of `gpt-5.6-sol` (https://developers.openai.com/api/docs/guides/latest-model/gpt-5.6.md). |
-| anthropic | `{"output_config": {"effort": "<value>"}}`; `none` is `{"thinking": {"type": "disabled"}}` | https://platform.claude.com/docs/en/build-with-claude/effort.md, https://platform.claude.com/docs/en/api/messages/create.md, and the per-model `"disabled"` column of https://platform.claude.com/docs/en/build-with-claude/thinking.md. |
-| gemini | `{"generationConfig": {"thinkingConfig": {"thinkingLevel": "<VALUE>"}}}`; `none` is a `thinkingBudget` of 0, on 2.5 Flash and Flash-Lite only | https://ai.google.dev/api/generate-content.md.txt, https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt, and the model pages under https://ai.google.dev/gemini-api/docs/models/. |
-| deepseek | `{"reasoning_effort": "<value>"}` | https://api-docs.deepseek.com/api/create-chat-completion/ and https://api-docs.deepseek.com/guides/thinking_mode/. |
-| xai | `{"reasoning_effort": "<value>"}` | https://docs.x.ai/developers/model-capabilities/text/reasoning.md, https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md, and the model pages under https://docs.x.ai/developers/models/. |
-| glm | `{"thinking": {"type": "enabled"}, "reasoning_effort": "<value>"}`; `none` is `{"thinking": {"type": "disabled"}}` | https://docs.z.ai/guides/capabilities/thinking.md and https://docs.bigmodel.cn/cn/guide/capabilities/thinking.md. |
-| meta | `{"reasoning_effort": "<value>"}` | https://dev.meta.ai/docs/reasoning.md and https://dev.meta.ai/docs/models.md. |
+| OpenAI | `{"reasoning": {"effort": "<value>"}}` | https://developers.openai.com/api/docs/guides/reasoning.md and each model page under https://developers.openai.com/api/docs/models/; `gpt-5.6` is an alias of `gpt-5.6-sol` (https://developers.openai.com/api/docs/guides/latest-model/gpt-5.6.md). |
+| Anthropic | `{"output_config": {"effort": "<value>"}}`; `none` is `{"thinking": {"type": "disabled"}}` | https://platform.claude.com/docs/en/build-with-claude/effort.md, https://platform.claude.com/docs/en/api/messages/create.md, and the per-model `"disabled"` column of https://platform.claude.com/docs/en/build-with-claude/thinking.md. |
+| Gemini | `{"generationConfig": {"thinkingConfig": {"thinkingLevel": "<VALUE>"}}}`; `none` is a `thinkingBudget` of 0, on 2.5 Flash and Flash-Lite only | https://ai.google.dev/api/generate-content.md.txt, https://ai.google.dev/gemini-api/docs/generate-content/thinking.md.txt, and the model pages under https://ai.google.dev/gemini-api/docs/models/. |
+| DeepSeek | `{"reasoning_effort": "<value>"}` | https://api-docs.deepseek.com/api/create-chat-completion/ and https://api-docs.deepseek.com/guides/thinking_mode/. |
+| xAI | `{"reasoning_effort": "<value>"}` | https://docs.x.ai/developers/model-capabilities/text/reasoning.md, https://docs.x.ai/developers/rest-api-reference/inference/chat-completions.md, and the model pages under https://docs.x.ai/developers/models/. |
+| GLM | `{"thinking": {"type": "enabled"}, "reasoning_effort": "<value>"}`; `none` is `{"thinking": {"type": "disabled"}}` | https://docs.z.ai/guides/capabilities/thinking.md and https://docs.bigmodel.cn/cn/guide/capabilities/thinking.md. |
+| Meta | `{"reasoning_effort": "<value>"}` | https://dev.meta.ai/docs/reasoning.md and https://dev.meta.ai/docs/models.md. |
 
 ## Browser Tool Sources
 
