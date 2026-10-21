@@ -53,7 +53,8 @@ from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.toolsets.agent_swarm import AgentSwarmTools
 
-# The shared system prompt's sections in order (web search only when a search tool is selected), and the other catalog texts a run reads.
+# The shared system prompt's sections in order (web search only when a
+# search tool is selected), and the other catalog texts a run reads.
 _SECTIONS = (Prompt.AGENT_SWARM_SYSTEM_ENVIRONMENT, Prompt.AGENT_SWARM_SYSTEM_TOOLS, Prompt.AGENT_SWARM_SYSTEM_WEB_SEARCH, Prompt.AGENT_SWARM_SYSTEM_MESSAGING, Prompt.AGENT_SWARM_SYSTEM_TURNS, Prompt.AGENT_SWARM_SYSTEM_GOAL, Prompt.AGENT_SWARM_SYSTEM_INSTRUCTIONS, Prompt.AGENT_SWARM_SYSTEM_OBJECTIVE, Prompt.AGENT_SWARM_SYSTEM_THOROUGHNESS)
 _REPLIES = (Prompt.AGENT_SWARM_MESSAGE_SENT, Prompt.AGENT_SWARM_MESSAGE_UNKNOWN_RECIPIENT, Prompt.AGENT_SWARM_MESSAGE_STOPPED_RECIPIENT, Prompt.AGENT_SWARM_MESSAGE_BLANK_TEXT, Prompt.AGENT_SWARM_INBOX, Prompt.AGENT_SWARM_INBOX_MESSAGE, Prompt.AGENT_SWARM_COMPACT_REQUESTED)
 
@@ -63,7 +64,8 @@ class AgentSwarmRuntime:
 
     def __init__(self, settings: AgentSwarmSettings, root: Path, *, workplace_created: bool) -> None:
         # @intent one-runtime-per-run-built-without-side-effects
-        # Only checked settings and an already prepared folder path are accepted; building the runtime creates nothing on disk.
+        # Only checked settings and an already prepared folder path are
+        # accepted; building the runtime creates nothing on disk.
         if not isinstance(settings, AgentSwarmSettings) or not isinstance(root, Path):
             raise ConfigurationError(f"AgentSwarmRuntime requires an AgentSwarmSettings instance and a Path; got {type(settings).__name__} and {type(root).__name__}.", details={"received_settings": type(settings).__name__, "received_root": type(root).__name__})
         self._settings = settings
@@ -84,7 +86,8 @@ class AgentSwarmRuntime:
         self._last_prompt_tokens: dict[str, int | None] = {}
         self._last_writer: dict[str, str] = {}
         self._compaction_requests: dict[str, str] = {}
-        # One search tool for every agent, built once around the developer's key.
+        # One search tool for every agent, built once around the
+        # developer's key.
         self._search_tool: BaseTool | None = None
         if settings.web_search is not None:
             self._search_tool = AgentSwarmTools.search_tool_for(AgentSwarmWebSearch(settings.web_search), str(settings.web_search_api_key))
@@ -93,58 +96,80 @@ class AgentSwarmRuntime:
 
     async def arun(self, goal: str) -> AgentSwarmResult:
         """Run every agent on the goal until the swarm stops, and return the stop reason, every event, and the replies."""
-        # Refuse a goal that is not text before anything happens, so a refused call leaves this runtime unused.
+        # Refuse a goal that is not text before anything happens, so a
+        # refused call leaves this runtime unused.
         RecordFieldValidator.require_text(goal, "goal")
         # @intent a-swarm-runtime-runs-once
-        # All run state lives on this object, so a second run would start from the first one's inboxes, turns, and events.
+        # All run state lives on this object, so a second run would
+        # start from the first one's inboxes, turns, and events.
         if self._ran:
             raise ConfigurationError("This AgentSwarmRuntime has already run its swarm; AgentSwarm builds a fresh runtime for every arun.", details={"field": "arun"})
         self._ran = True
-        # Start the event clock now, so every event's time counts from the start of the run.
+        # Start the event clock now, so every event's time counts from
+        # the start of the run.
         self._events = AgentSwarmEvents(self._settings.on_event)
 
-        # Record the shared folder first, and whether this run created it.
+        # Record the shared folder first, and whether this run
+        # created it.
         folder_state = AgentSwarmFolderState.CREATED if self._workplace_created else AgentSwarmFolderState.EXISTED
         self._events.record(AgentSwarmEventKind.WORKPLACE_PREPARED, "", path=str(self._root), folder_state=folder_state)
-        # Build a fresh agent for every member, with an empty history, the swarm tools, and the shared prompt rendered for it.
+        # Build a fresh agent for every member, with an empty history,
+        # the swarm tools, and the shared prompt rendered for it.
         agents: list[AgentSwarmMemberAgent] = []
         for member in self._settings.agents:
             agents.append(self._build_member(member, self._render_system_prompt(member.name)))
             self._events.record(AgentSwarmEventKind.AGENT_CREATED, member.name)
-        # Every agent starts working: its first turn counts against the budget, and its start is recorded in member order.
+        # Every agent starts working: its first turn counts against the
+        # budget, and its start is recorded in member order.
         for agent in agents:
             self._working.add(agent.name)
             self._events.record(AgentSwarmEventKind.AGENT_STARTED, agent.name)
         self._turns = len(agents)
-        # Deliver the start events, then run every agent in its own task until every task has ended. The time limit cancels whatever is still running, even a slow delivery of the start events.
+        # Deliver the start events, then run every agent in its own task
+        # until every task has ended. The time limit cancels whatever is
+        # still running, even a slow delivery of the start events.
         with contextlib.suppress(TimeoutError):
             async with asyncio.timeout(self._settings.timeout_seconds), asyncio.TaskGroup() as group:
                 await self._events.flush()
                 for agent in agents:
                     group.create_task(self._run_member(agent, goal))
-        # The time limit decides the stop only when nothing decided it before.
+        # The time limit decides the stop only when nothing decided
+        # it before.
         if self._stop_reason is None:
             self._stop(AgentSwarmStopReason.TIMEOUT)
         stop_reason = self._stop_reason or AgentSwarmStopReason.TIMEOUT
-        # Record the end and deliver every event not delivered yet, the end included.
+        # Record the end and deliver every event not delivered yet, the
+        # end included.
         self._events.record(AgentSwarmEventKind.SWARM_ENDED, "", stop_reason=stop_reason)
         await self._events.flush()
-        # The replies are each released agent's last reply, in member order; a failed, exited, or cancelled agent has none.
+        # The replies are each released agent's last reply, in member
+        # order; a failed, exited, or cancelled agent has none.
         replies = tuple(self._replies[name] for name in self._names if name in self._replies)
         return AgentSwarmResult(stop_reason=stop_reason, events=self._events.events, replies=replies, event_error_types=self._events.error_types)
 
     async def _run_member(self, agent: AgentSwarmMemberAgent, goal: str) -> None:
         # @intent one-failing-agent-never-stops-the-others
-        # One long run per agent, ending in exactly one terminal event. An SDK error (BaseAgent wraps every model, turn-end, and delivery error, with the original as its cause), a cancel the swarm did not ask for, or a run that returns before the stop removes only this agent; anything else passes through.
+        # One long run per agent, ending in exactly one terminal event.
+        # An SDK error (BaseAgent wraps every model, turn-end, and
+        # delivery error, with the original as its cause), a cancel the
+        # swarm did not ask for, or a run that returns before the stop
+        # removes only this agent; anything else passes through.
         name = agent.name
         try:
-            # The run is told the member's provider, so the loop reads its tool calls in that provider's shape.
+            # The run is told the member's provider, so the loop reads
+            # its tool calls in that provider's shape.
             reply = await agent.arun(goal, provider=agent.runner_config.provider)
         except VidbyteSdkError as error:
             self._fail(name, AgentSwarmEventKind.AGENT_FAILED, self._failure_text(error))
         except asyncio.CancelledError as cancel:
             # @intent a-stray-cancel-fails-its-agent-and-is-raised-again
-            # The task group ignores a cancelled task, so a tool or callback that raised CancelledError would leave the agent counted as working until the time limit; that cancel fails the agent. The swarm's own cancels leave cancelling() above zero; they, and a cancel after the stop, only record agent_cancelled without flushing, because the task is being torn down and the last flush delivers it.
+            # The task group ignores a cancelled task, so a tool or
+            # callback that raised CancelledError would leave the agent
+            # counted as working until the time limit; that cancel fails
+            # the agent. The swarm's own cancels leave cancelling()
+            # above zero; they, and a cancel after the stop, only record
+            # agent_cancelled without flushing, because the task is
+            # being torn down and the last flush delivers it.
             task = asyncio.current_task()
             if task is not None and task.cancelling() == 0 and self._stop_reason is None:
                 detail = str(cancel).strip() or "the run was cancelled, but not by the swarm"
@@ -159,7 +184,8 @@ class AgentSwarmRuntime:
                 self._events.record(AgentSwarmEventKind.AGENT_CANCELLED, name, agent_state=state)
             raise
         else:
-            # A run that returns once the agent was released or the stop was decided ends normally, and its reply is kept.
+            # A run that returns once the agent was released or the stop
+            # was decided ends normally, and its reply is kept.
             if name not in self._working or self._stop_reason is not None:
                 self._working.discard(name)
                 self._replies[name] = reply
@@ -167,7 +193,8 @@ class AgentSwarmRuntime:
                 await self._events.flush()
                 return
             self._fail(name, AgentSwarmEventKind.AGENT_EXITED, self._early_exit_text(reply))
-        # The agent has left the swarm, and it may have been the last one working.
+        # The agent has left the swarm, and it may have been the last
+        # one working.
         reason = self._end_reason()
         if reason is not None:
             self._stop(reason)
@@ -176,21 +203,30 @@ class AgentSwarmRuntime:
     async def post_message(self, sender: str, recipient: object, text: object) -> str:
         """Queue one message for any agent and wake it when it is idle and turns remain; never waits for the recipient."""
         # @intent a-send-is-decided-and-queued-in-one-step
-        # Everything from the checks to the wake runs with no await, so the recipient cannot end its turn in between: either it is working and collects the message later, or it is idle and this send wakes it, or refuses the wake when no turn is left.
-        # First refuse text that is not a non-blank string, then a name that is no agent of this swarm; nothing is queued then.
+        # Everything from the checks to the wake runs with no await, so
+        # the recipient cannot end its turn in between: either it is
+        # working and collects the message later, or it is idle and this
+        # send wakes it, or refuses the wake when no turn is left.
+        # First refuse text that is not a non-blank string, then a name
+        # that is no agent of this swarm; nothing is queued then.
         peer = "" if recipient is None else str(recipient)
         if not isinstance(text, str) or not text.strip():
             await self._refuse(sender, peer, self._texts[Prompt.AGENT_SWARM_MESSAGE_BLANK_TEXT])
         if not isinstance(recipient, str) or recipient not in self._inboxes:
             await self._refuse(sender, peer, self._texts[Prompt.AGENT_SWARM_MESSAGE_UNKNOWN_RECIPIENT].format(recipient=str(recipient), agents=", ".join(self._names)))
-        # Record the message as its own MESSAGE_SENT event, which carries its id, sender, and text.
+        # Record the message as its own MESSAGE_SENT event, which
+        # carries its id, sender, and text.
         sent = self._events.record(AgentSwarmEventKind.MESSAGE_SENT, sender, peer=recipient, text=text)
-        # An agent that has left, or any agent once the swarm is stopping, never receives it: it is undelivered at once, and the sender is told so as a success.
+        # An agent that has left, or any agent once the swarm is
+        # stopping, never receives it: it is undelivered at once, and
+        # the sender is told so as a success.
         if recipient in self._failed or self._stop_reason is not None:
             self._events.record(AgentSwarmEventKind.MESSAGE_UNDELIVERED, recipient, peer=sender, message_id=sent.message_id)
             await self._events.flush()
             return self._texts[Prompt.AGENT_SWARM_MESSAGE_STOPPED_RECIPIENT].format(recipient=recipient)
-        # Queue it, and wake an idle recipient now, counting its new turn, so the wake is never lost; with no turn left, refuse the wake.
+        # Queue it, and wake an idle recipient now, counting its new
+        # turn, so the wake is never lost; with no turn left, refuse
+        # the wake.
         self._inboxes[recipient].append(sent)
         if recipient in self._waiting:
             if self._turns < self._settings.max_turns:
@@ -215,21 +251,28 @@ class AgentSwarmRuntime:
     async def end_turn(self, name: str, reply: str) -> str:
         """End an agent's turn: return its next turn's messages, at once or when a message wakes it, or "" when the swarm stops."""
         # @intent a-turn-end-is-decided-in-one-step
-        # The idle mark and the inbox check run with no await between them, so a message accepted before is found here and one accepted after finds the agent idle and wakes it; none can sit unseen.
+        # The idle mark and the inbox check run with no await between
+        # them, so a message accepted before is found here and one
+        # accepted after finds the agent idle and wakes it; none can
+        # sit unseen.
         self._events.record(AgentSwarmEventKind.AGENT_IDLE, name, text=reply)
-        # Once the stop is decided no turn starts: the run returns, and the agent is released.
+        # Once the stop is decided no turn starts: the run returns, and
+        # the agent is released.
         if self._stop_reason is not None:
             self._working.discard(name)
             await self._events.flush()
             return ""
-        # Mail is already waiting and a turn is left: start the next turn at once with it.
+        # Mail is already waiting and a turn is left: start the next
+        # turn at once with it.
         if self._inboxes[name] and self._turns < self._settings.max_turns:
             self._turns += 1
             self._events.record(AgentSwarmEventKind.AGENT_WOKE, name)
             text = self._drain(name)
             await self._events.flush()
             return text
-        # Otherwise wait idle, refusing one wake per message that no turn is left for; the end check runs, as this may be the last agent working.
+        # Otherwise wait idle, refusing one wake per message that no
+        # turn is left for; the end check runs, as this may be the last
+        # agent working.
         for sent in self._inboxes[name]:
             self._events.record(AgentSwarmEventKind.WAKE_REFUSED, name, peer=sent.agent, message_id=sent.message_id)
         self._working.discard(name)
@@ -240,7 +283,8 @@ class AgentSwarmRuntime:
             self._stop(reason)
         await self._events.flush()
         await wake
-        # A send marks the agent working before it resolves the wait; the stop resolves it without doing so.
+        # A send marks the agent working before it resolves the wait;
+        # the stop resolves it without doing so.
         if self._stop_reason is not None or name not in self._working:
             self._working.discard(name)
             return ""
@@ -255,17 +299,21 @@ class AgentSwarmRuntime:
 
     async def record_tool_outcome(self, name: str, call: ToolCall, result: ToolResult) -> None:
         """Record what one raw tool result shows beyond its status: a cut result, a changed file, or a failed command."""
-        # The model sees at most the cap, so the exact count it lost is recorded.
+        # The model sees at most the cap, so the exact count it lost
+        # is recorded.
         omitted = len(result.output) - AGENT_SWARM_TOOL_RESULT_MAX_CHARS
         if omitted > 0:
             self._events.record(AgentSwarmEventKind.TOOL_RESULT_TRUNCATED, name, tool_name=call.tool_name, omitted_chars=omitted)
-        # A successful write_text or patch_file names the file's absolute path, and the previous writer when another agent wrote it last.
+        # A successful write_text or patch_file names the file's
+        # absolute path, and the previous writer when another agent
+        # wrote it last.
         path = self._changed_path(call, result)
         if path is not None:
             previous = self._last_writer.get(path, "")
             self._events.record(AgentSwarmEventKind.FILE_CHANGED, name, path=path, peer=previous if previous != name else "")
             self._last_writer[path] = name
-        # A bash command stopped at its time limit, or one that exited non-zero.
+        # A bash command stopped at its time limit, or one that
+        # exited non-zero.
         failure = self._command_failure(call, result)
         if failure is not None:
             self._events.record(AgentSwarmEventKind.COMMAND_FAILED, name, text=failure)
@@ -274,9 +322,13 @@ class AgentSwarmRuntime:
     async def record_model_call(self, name: str, usage: object | None, model_calls: int) -> None:
         """Record one model call's usage, count it against the token budget, and decide max_tokens when the budget is reached."""
         # @intent the-budget-is-decided-in-the-call-that-spends-it
-        # The call is recorded with its billed input, output, and cached input (zeros when unreported), and the stop is decided in the same step, so no agent can start a paid call between the call that spent the budget and the decision.
+        # The call is recorded with its billed input, output, and cached
+        # input (zeros when unreported), and the stop is decided in the
+        # same step, so no agent can start a paid call between the call
+        # that spent the budget and the decision.
         self._events.record(AgentSwarmEventKind.MODEL_CALLED, name, input_tokens=int(getattr(usage, "input_tokens", None) or 0), output_tokens=int(getattr(usage, "output_tokens", None) or 0), cached_tokens=int(getattr(usage, "cached_input_tokens", None) or 0), model_calls=model_calls)
-        # Every prompt token the provider counted, cached or fresh, is this agent's measured context for its next compaction check.
+        # Every prompt token the provider counted, cached or fresh, is
+        # this agent's measured context for its next compaction check.
         prompt_tokens = getattr(usage, "total_prompt_tokens", None)
         if isinstance(prompt_tokens, int):
             self._last_prompt_tokens[name] = prompt_tokens
@@ -298,8 +350,7 @@ class AgentSwarmRuntime:
     async def request_compaction(self, name: str, focus: object) -> str:
         """Keep one pending compaction request for an agent, replacing an earlier one's focus, and return the compact tool's reply."""
         # @intent one-pending-compaction-per-agent
-        # A second request before the iteration ends replaces the first
-        # one's focus, so one iteration compacts at most once.
+        # A later request replaces the earlier one's focus.
         self._compaction_requests[name] = focus.strip() if isinstance(focus, str) else ""
         await self._events.flush()
         return self._texts[Prompt.AGENT_SWARM_COMPACT_REQUESTED]
@@ -307,8 +358,7 @@ class AgentSwarmRuntime:
     def take_compaction_request(self, name: str) -> str | None:
         """Remove and return an agent's pending focus ("" without one), or None when no request is pending."""
         # @intent one-pending-compaction-per-agent
-        # Taking the request also clears it, so it compacts exactly one
-        # iteration and never a later one again.
+        # Taking the request clears it, so it compacts one iteration.
         return self._compaction_requests.pop(name, None)
 
     def last_prompt_tokens(self, name: str) -> int | None:
@@ -326,26 +376,34 @@ class AgentSwarmRuntime:
         return self._stop_reason is not None
 
     def _render_system_prompt(self, name: str) -> str:
-        # The sections joined by one blank line, rendered with only the agent's name, its peers, the workplace, and the search tool's name; values are never parsed as templates.
+        # The sections joined by one blank line, rendered with only the
+        # agent's name, its peers, the workplace, and the search tool's
+        # name; values are never parsed as templates.
         search_tool = self._search_tool.name if self._search_tool is not None else ""
         values = {"name": name, "peers": ", ".join(other for other in self._names if other != name), "workplace": str(self._root), "search_tool": search_tool}
         sections = [section for section in _SECTIONS if self._search_tool is not None or section is not Prompt.AGENT_SWARM_SYSTEM_WEB_SEARCH]
         return "\n\n".join(self._texts[section].format(**values) for section in sections)
 
     def _build_member(self, member: AgentSwarmMember, system_prompt: str) -> AgentSwarmMemberAgent:
-        # The five workplace tools, message, compact, then the search tool; the loop adds isDone last. The settings matched the keys, so api_keys is the matched record.
+        # The five workplace tools, message, compact, then the search
+        # tool; the loop adds isDone last. The settings matched the
+        # keys, so api_keys is the matched record.
         search = (self._search_tool,) if self._search_tool is not None else ()
         tools = (*AgentSwarmTools(self._root).all(), AgentSwarmMessageTool(self, member.name, self._names), AgentSwarmCompactTool(self, member.name), *search)
         return AgentSwarmMemberAgent(self, member, system_prompt=system_prompt, tools=tools, api_keys=cast("ProviderKeys", self._settings.api_keys))
 
     async def _refuse(self, sender: str, peer: str, reason: str) -> NoReturn:
-        # A refused send is recorded with the attempted name as text and reaches the model as a tool error it can act on.
+        # A refused send is recorded with the attempted name as text and
+        # reaches the model as a tool error it can act on.
         self._events.record(AgentSwarmEventKind.MESSAGE_REFUSED, sender, peer=peer, text=reason)
         await self._events.flush()
         raise ToolExecutionError(reason)
 
     def _drain(self, name: str) -> str:
-        # Take every waiting message out and record its delivery in the same step, so none is delivered twice; render them oldest first, each labeled with its sender, as one user message whose texts are values, never templates.
+        # Take every waiting message out and record its delivery in the
+        # same step, so none is delivered twice; render them oldest
+        # first, each labeled with its sender, as one user message whose
+        # texts are values, never templates.
         messages, self._inboxes[name] = self._inboxes[name], []
         for sent in messages:
             self._events.record(AgentSwarmEventKind.MESSAGE_DELIVERED, name, peer=sent.agent, message_id=sent.message_id)
@@ -353,7 +411,8 @@ class AgentSwarmRuntime:
         return self._texts[Prompt.AGENT_SWARM_INBOX].format(messages=blocks)
 
     def _fail(self, name: str, kind: AgentSwarmEventKind, text: str) -> None:
-        # The agent leaves with its failure or exit recorded, and every message waiting for it is marked undelivered in the same step.
+        # The agent leaves with its failure or exit recorded, and every
+        # message waiting for it is marked undelivered in the same step.
         self._working.discard(name)
         self._failed.add(name)
         self._waiting.pop(name, None)
@@ -364,7 +423,11 @@ class AgentSwarmRuntime:
 
     def _stop(self, reason: AgentSwarmStopReason) -> None:
         # @intent the-stop-is-decided-once-in-one-step
-        # On the time limit a member still counted as working never ran a cancel branch of its own (its task never started), so it is cancelled here. Then the decision is recorded, every queued message is marked undelivered in member order, and every idle agent is released, so its turn end returns "".
+        # On the time limit a member still counted as working never ran
+        # a cancel branch of its own (its task never started), so it is
+        # cancelled here. Then the decision is recorded, every queued
+        # message is marked undelivered in member order, and every idle
+        # agent is released, so its turn end returns "".
         self._stop_reason = reason
         if reason is AgentSwarmStopReason.TIMEOUT:
             for name in self._names:
@@ -384,11 +447,10 @@ class AgentSwarmRuntime:
     def _end_reason(self) -> AgentSwarmStopReason | None:
         # @intent the-swarm-ends-exactly-when-nobody-works
         # Sends are queued by working agents in their own step, so once
-        # nobody works no message is in flight. The reason is FAILED when
-        # every agent failed or exited, MAX_TURNS when a running agent
-        # holds mail no turn was left for, and QUIET otherwise. It only
-        # decides; each caller passes the reason to _stop in the same
-        # step, and None means the swarm goes on.
+        # nobody works no message is in flight. The reason is FAILED
+        # when every agent failed or exited, MAX_TURNS when a running
+        # agent holds mail no turn was left for, and QUIET otherwise.
+        # Each caller passes the reason to _stop in the same step.
         if self._working or self._stop_reason is not None:
             return None
         running = [name for name in self._names if name not in self._failed]
@@ -415,16 +477,15 @@ class AgentSwarmRuntime:
         # for every other tool.
         if call.tool_name != AGENT_SWARM_SHELL_TOOL_NAME:
             return None
-        exit_code = result.metadata.get("exit_code")
         if result.metadata.get("error") == AGENT_SWARM_SHELL_TIME_LIMIT_ERROR:
             return AGENT_SWARM_SHELL_TIME_LIMIT_ERROR
-        if type(exit_code) is int and exit_code:
-            return f"exit code {exit_code}"
-        return None
+        exit_code = result.metadata.get("exit_code")
+        return f"exit code {exit_code}" if type(exit_code) is int and exit_code else None
 
     @staticmethod
     def _budget_total(usage: object | None) -> int:
-        # total_tokens when reported, else input plus output, a missing value counting as zero.
+        # total_tokens when reported, else input plus output, a missing
+        # value counting as zero.
         total = getattr(usage, "total_tokens", None)
         if isinstance(total, int):
             return total
@@ -432,14 +493,16 @@ class AgentSwarmRuntime:
 
     @staticmethod
     def _failure_text(error: VidbyteSdkError) -> str:
-        # BaseAgent wraps the real failure, such as the provider's error, as the cause of a generic one, so the cause names it.
+        # BaseAgent wraps the real failure, such as the provider's
+        # error, as the cause of a generic one, so the cause names it.
         cause = error.__cause__ if error.__cause__ is not None else error
         detail = str(cause).strip()
         return f"{type(cause).__name__}: {detail}" if detail else type(cause).__name__
 
     @staticmethod
     def _early_exit_text(reply: AgentMessage) -> str:
-        # A run that returned on its own is named by the loop's own stop reason value, such as middleware_abort.
+        # A run that returned on its own is named by the loop's own stop
+        # reason value, such as middleware_abort.
         stop = reply.metadata.get("stop_reason")
         return str(getattr(stop, "value", stop) or "unknown")
 

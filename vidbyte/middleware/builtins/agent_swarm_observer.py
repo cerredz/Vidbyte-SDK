@@ -39,8 +39,8 @@ class AgentSwarmObserverMiddleware(AgentMiddleware):
     async def before_model_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Refuse the model call once the swarm is stopping, so no paid call starts after the decision."""
         # @intent no-paid-call-after-the-stop-decision
-        # Once the swarm has decided to stop, every further model call of
-        # every member is refused here, before anything is sent.
+        # Once the swarm has decided to stop, every further model call
+        # of every member is refused here, before anything is sent.
         if self.swarm_runtime.stopping:
             return MiddlewareDecision.abort(AGENT_SWARM_STOPPING_REASON)
         return MiddlewareDecision.continue_()
@@ -50,8 +50,9 @@ class AgentSwarmObserverMiddleware(AgentMiddleware):
         # Report the call first, because this call may be the one that
         # spends the swarm's token budget and decides the stop.
         await self.swarm_runtime.record_model_call(ctx.agent_name, ctx.model_usage, ctx.model_call_count)
-        # Then stop this member at once when the swarm is stopping, so it
-        # neither runs the response's tools nor calls the model again.
+        # Then stop this member at once when the swarm is stopping,
+        # so it neither runs the response's tools nor calls the
+        # model again.
         if self.swarm_runtime.stopping:
             return MiddlewareDecision.abort(AGENT_SWARM_STOPPING_REASON)
         return MiddlewareDecision.continue_()
@@ -59,9 +60,9 @@ class AgentSwarmObserverMiddleware(AgentMiddleware):
     async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Report the failed model attempt and let the loop's own retry and fallback decide what happens next."""
         # @intent model-errors-are-observed-never-decided
-        # Every failed attempt is recorded, even one a retry later absorbs,
-        # and the decision always continues, so the loop's retry policy is
-        # untouched by the swarm.
+        # Every failed attempt is recorded, even one a retry later
+        # absorbs, and the decision always continues, so the loop's
+        # retry policy is untouched by the swarm.
         if ctx.error is not None:
             await self.swarm_runtime.record_model_error(ctx.agent_name, ctx.error)
         return MiddlewareDecision.continue_()
@@ -79,8 +80,8 @@ class AgentSwarmTrimMiddleware(MessageHistoryCompactionMiddleware):
     name = "AgentSwarmTrimMiddleware"
 
     def __init__(self, swarm_runtime: AgentSwarmRuntime) -> None:
-        # The same trim trim_with_provider_boundaries builds, capped at the
-        # swarm's history limit.
+        # The same trim trim_with_provider_boundaries builds, capped at
+        # the swarm's history limit.
         super().__init__(mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, max_tokens=AGENT_SWARM_HISTORY_MAX_TOKENS)
         self.swarm_runtime = swarm_runtime
 

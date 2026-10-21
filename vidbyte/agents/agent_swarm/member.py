@@ -104,8 +104,9 @@ class AgentSwarmMemberRuntime(AgentRuntime):
         else:
             trigger = None
         if trigger is not None and not self.swarm_runtime.stopping:
-            # Hand the focus to the summarizer and forget any earlier
-            # response, so a summary call is seen only when one was made.
+            # Hand the focus to the summarizer and forget any
+            # earlier response, so a summary call is seen only when
+            # one was made.
             self._summarizer.focus = focus or ""
             self._summarizer.last_response = None
             # Keep the newest messages that fit the target and summarize
@@ -114,16 +115,18 @@ class AgentSwarmMemberRuntime(AgentRuntime):
             # A summary call was made only when something older existed;
             # record its usage once, then the compaction itself.
             if stats is not None and self._summarizer.last_response is not None:
-                # Remember the rewritten history's size, so the next
-                # automatic compaction waits for a target of new history.
+                # Remember the rewritten history's size, so the
+                # next automatic compaction waits for a target of
+                # new history.
                 self._compacted_estimate = self._estimate(messages)
                 await self._count_side_call(state, self._summarizer.last_response)
                 await self.swarm_runtime.record_compaction(name, trigger, focus or "", measured, stats.before_count - stats.after_count + 1)
 
         # @intent mail-reaches-a-working-agent-between-tool-calls
-        # Then the swarm hands over everything waiting for this agent at
-        # once and empties its inbox in the same step, so each message is
-        # appended exactly once, after the tool results and the summary.
+        # Then the swarm hands over everything waiting for this agent
+        # at once and empties its inbox in the same step, so each
+        # message is appended exactly once, after the tool results and
+        # the summary.
         text = await self.swarm_runtime.collect_messages(name)
         if text:
             messages.append({"role": "user", "content": text})
@@ -201,8 +204,9 @@ class AgentSwarmMessageTool(BaseTool):
     def validate_call(self, call: ToolCall) -> str | None:
         """Accept every call, so a missing or non-text argument reaches the swarm, which refuses it with its own reason."""
         # @intent the-swarm-refuses-and-records-every-bad-send
-        # The loop's own check would refuse a missing argument before
-        # the swarm sees it, so no message_refused event would record it.
+        # The loop's own check would refuse a missing argument
+        # before the swarm sees it, so no message_refused event
+        # would record it.
         return None
 
     async def execute(self, call: ToolCall) -> ToolResult:
