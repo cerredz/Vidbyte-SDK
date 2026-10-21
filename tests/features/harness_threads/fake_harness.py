@@ -1,14 +1,14 @@
 """FILE: tests/features/harness_threads/fake_harness.py
 
 PURPOSE: A standard-library stand-in for the three vendor CLIs the harness thread functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`) and for `wsl.exe`, scripted by a JSON scenario file and logging what each process received.
-ROLE IN CODEBASE: Run as a real child process by the harness_threads tests and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
+ROLE IN CODEBASE: Run as a real child process by the harness_threads tests, and from its path by the harness_compose tests, and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
 ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME keyed by --cwd, as Grok does; opencode and Muse under the scenario's state folder), so continue and fork behave like the vendors.
-FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6).
+FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6). For harness_compose: scripted applies the per-launch `answers` and the prompt-matched `replies` and names the launch's `label`; claim_turn numbers the launches of one scenario; touch_workspace logs the digests of `observe_files`, writes `write_files` into the working folder and deletes `delete_paths`; linger_on_term makes a `term_linger` process outlast SIGTERM on POSIX; run_marker leaves a marker file for the hostile git configuration test.
 COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI or the real wsl.exe. 3. Do not log a credential value; only echo_secrets mode prints one, on purpose, into the vendor's own error output. 4. Never use shell=True.
 KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode reads stdin as bytes and decodes UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §9.2, §13, §15
-TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §9.2, §13, §15; tests/features/harness_compose/FEATURE.md; docs/spec/native-thread-compose/spec.md §13
+TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads tests/features/harness_compose
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -45,6 +46,7 @@ UUID7_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f
 WSL_DISTRO_NOT_FOUND = "There is no distribution with the supplied name.\nError code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\n"
 GROK_NOT_SIGNED_IN = "Not signed in. Run `grok login` or set XAI_API_KEY."
 MUSE_KEY_REJECTED = "Error: failed to fetch model catalog: authentication failed: your API key from META_API_KEY was rejected\n"
+COMPOSE_MATCH_KEYS = ("exact", "contains")
 
 
 def digest(value: str) -> dict[str, Any]:
@@ -190,6 +192,16 @@ def hold(scenario: dict[str, Any]) -> str:
     return "limit"
 
 
+def linger_on_term(scenario: dict[str, Any], log: FakeLog) -> None:
+    # harness_compose: with "term_linger", a POSIX process logs a
+    # "terminating" record on SIGTERM and keeps running, as a vendor
+    # CLI that is slow to stop would, so only the stop's forced kill
+    # ends it. Windows stops a tree with taskkill /F, which no
+    # handler sees, so the field does nothing there.
+    if scenario.get("term_linger") and sys.platform != "win32":
+        signal.signal(signal.SIGTERM, lambda number, _frame: log.write("terminating", signal=number))
+
+
 def start_grandchild(log: FakeLog) -> None:
     # A grandchild that inherits the pipes, so only a whole-tree stop
     # ends it.
@@ -264,12 +276,98 @@ def new_id(prefix: str = "") -> str:
     return prefix + str(uuid.uuid4())
 
 
+def claim_turn(scenario: dict[str, Any]) -> int:
+    # harness_compose: the launch number of this scenario, claimed with
+    # an exclusive create like claim_launch_number, so one step's first
+    # answer, its repair turns and a stage's attempts can differ.
+    folder = Path(scenario["state_dir"]) / "turns"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = Path(sys.argv[1]).stem
+    number = 1
+    while True:
+        try:
+            os.close(os.open(folder / f"{stem}-{number:06d}.claim", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return number
+        except FileExistsError:
+            number += 1
+
+
+def scripted(scenario: dict[str, Any], prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    # harness_compose: "answers" overrides scenario fields for each
+    # launch of this scenario in turn (the last entry repeats), then the
+    # first "replies" rule whose "exact" or "contains" text matches the
+    # prompt overrides them again. Returns the scenario to play and the
+    # fields the start record adds: the label, the turn, the rule index.
+    merged = dict(scenario)
+    logged: dict[str, Any] = {}
+    if "label" in scenario:
+        logged["label"] = scenario["label"]
+    answers = scenario.get("answers") or []
+    if answers:
+        turn = claim_turn(scenario)
+        merged.update(answers[min(turn, len(answers)) - 1])
+        logged["turn"] = turn
+    for index, rule in enumerate(scenario.get("replies") or []):
+        exact, contains = rule.get("exact"), rule.get("contains")
+        if (exact is not None and prompt == exact) or (contains is not None and contains in prompt):
+            merged.update({key: value for key, value in rule.items() if key not in COMPOSE_MATCH_KEYS})
+            logged["reply"] = index
+            break
+    return merged, logged
+
+
+def touch_workspace(scenario: dict[str, Any], log: FakeLog) -> None:
+    # harness_compose: log the SHA-256 of each "observe_files" path in
+    # the working folder (None when it is not a file), then write each
+    # "write_files" entry ({relative path: text}) there as UTF-8 bytes,
+    # as a vendor CLI editing its workspace would, then delete each
+    # "delete_paths" entry that exists: a file or a whole folder,
+    # named by an absolute path or one relative to the working folder.
+    observe = scenario.get("observe_files") or []
+    if observe:
+        found: dict[str, str | None] = {}
+        for relative in observe:
+            path = Path(os.getcwd()) / relative
+            found[relative] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        log.write("observed", files=found)
+    writes = scenario.get("write_files") or {}
+    for relative, text in writes.items():
+        path = Path(os.getcwd()) / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(text.encode("utf-8"))
+    if writes:
+        log.write("wrote", files=sorted(writes))
+    deleted: list[str] = []
+    for name in scenario.get("delete_paths") or []:
+        path = Path(os.getcwd()) / name
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+        else:
+            continue
+        deleted.append(name)
+    if deleted:
+        log.write("deleted", paths=deleted)
+
+
+def run_marker(scenario: dict[str, Any], args: list[str]) -> None:
+    # harness_compose T-6: a program that a hostile repository
+    # configuration names (diff.external, a textconv driver); it only
+    # leaves a marker file, so a test can tell whether git ran it.
+    Path(scenario["marker_file"]).write_text(" ".join(args), encoding="utf-8")
+    sys.exit(0)
+
+
 def run_grok(scenario: dict[str, Any], args: list[str]) -> None:
     env = dict(os.environ)
     options, switches, stray = parse_joined(args, GROK_SWITCHES)
+    scenario, script = scripted(scenario, options.get("--single", ""))
     home = env.get("GROK_HOME")
     log = FakeLog(scenario["log_dir"], "grok")
-    start_record(log, "grok", args, env, via_wsl=False, skills_folder=None if home is None else Path(home) / "skills", extra={"options": options, "switches": switches, "stray": stray})
+    start_record(log, "grok", args, env, via_wsl=False, skills_folder=None if home is None else Path(home) / "skills", extra={"options": options, "switches": switches, "stray": stray, **script})
+    touch_workspace(scenario, log)
+    linger_on_term(scenario, log)
     mode = scenario.get("mode", "ok")
     if scenario.get("grandchild"):
         start_grandchild(log)
@@ -349,9 +447,12 @@ def run_opencode(scenario: dict[str, Any], args: list[str]) -> None:
     kind = stdin_kind()
     stdin_text = read_stdin_text() if kind in ("pipe", "file") else ""
     options, switches, stray = parse_joined(args[1:], OPENCODE_SWITCHES)
+    scenario, script = scripted(scenario, stdin_text)
     config = sanitized_config(env.get("OPENCODE_CONFIG_CONTENT"))
     skills_paths = (config or {}).get("skills", {}).get("paths", []) if isinstance(config, dict) else []
-    start_record(log, "opencode", args, env, via_wsl=False, skills_folder=None, extra={"options": options, "switches": switches, "stray": stray, "stdin_text": stdin_text, "skill_paths_loadable": [Path(path).is_absolute() and (Path(path) / "SKILL.md").is_file() for path in skills_paths]})
+    start_record(log, "opencode", args, env, via_wsl=False, skills_folder=None, extra={"options": options, "switches": switches, "stray": stray, "stdin_text": stdin_text, "skill_paths_loadable": [Path(path).is_absolute() and (Path(path) / "SKILL.md").is_file() for path in skills_paths], **script})
+    touch_workspace(scenario, log)
+    linger_on_term(scenario, log)
     mode = scenario.get("mode", "ok")
     if scenario.get("grandchild"):
         start_grandchild(log)
@@ -460,9 +561,12 @@ def register_mark(scenario: dict[str, Any], env: dict[str, str]) -> None:
 
 def run_muse_exec(scenario: dict[str, Any], args: list[str], env: dict[str, str], via_wsl: bool, launcher_args: list[str]) -> None:
     options, switches, operands, problem = parse_muse_exec(args[1:])
+    scenario, script = scripted(scenario, operands[0] if len(operands) == 1 else "")
     xdg = host_path(env.get("XDG_CONFIG_HOME"), via_wsl)
     log = FakeLog(scenario["log_dir"], "muse-exec")
-    start_record(log, "muse-exec", args, env, via_wsl=via_wsl, skills_folder=None if xdg is None else xdg / "muse" / "skills", extra={"options": options, "switches": switches, "operands": operands, "launcher_args": launcher_args})
+    start_record(log, "muse-exec", args, env, via_wsl=via_wsl, skills_folder=None if xdg is None else xdg / "muse" / "skills", extra={"options": options, "switches": switches, "operands": operands, "launcher_args": launcher_args, **script})
+    touch_workspace(scenario, log)
+    linger_on_term(scenario, log)
     mode = scenario.get("mode", "ok")
     if via_wsl:
         register_mark(scenario, env)
@@ -675,6 +779,8 @@ def main() -> None:
         run_opencode(scenario, args)
     if program == "muse":
         run_muse(scenario, args, via_wsl=False, launcher_args=[])
+    if program == "marker":
+        run_marker(scenario, args)
     write_err(f"fake harness: unknown program {program!r}\n")
     sys.exit(2)
 

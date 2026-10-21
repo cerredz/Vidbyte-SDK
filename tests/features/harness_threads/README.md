@@ -9,7 +9,7 @@ This folder tests the nine harness thread functions of `vidbyte.harnesses.native
 - `README.md` describes the folder and its files.
 - `FEATURE.md` states the feature contract, the suite map and the strategies left out.
 - `conftest.py` provides the lazy contract imports, the sandbox (home, workspace, PATH, temp folder), stand-in builders, the INV-5 error check, timing knobs and process liveness checks.
-- `fake_harness.py` is the standard-library stand-in for grok, opencode, muse (exec and batch serve) and wsl.exe.
+- `fake_harness.py` is the standard-library stand-in for grok, opencode, muse (exec and batch serve) and wsl.exe; the harness_compose pack runs it from its path too.
 - `test_harness_threads_surface.py` checks exports, signatures, vocabularies, failure codes, contract constants, removed names and files, and `import vidbyte`.
 - `test_harness_threads_acceptance.py` runs the spec's example and all nine functions end to end.
 - `test_harness_threads_threads.py` checks continue and fork identity and unknown threads.
@@ -30,3 +30,4 @@ This folder tests the nine harness thread functions of `vidbyte.harnesses.native
 - 2026-10-15 - Created for the harness thread functions (spec `docs/spec/harness-thread-functions/spec.md` r3); replaces the `grok_host`, `opencode_host`, `muse_host` and `native_backends` packs of the rejected design.
 - 2026-10-15 - Added regression tests for the S4 review findings R-4, R-6 to R-11 and R-24 (`docs/spec/harness-thread-functions/review.md`).
 - 2026-10-15 - Added regression tests for the re-review findings R-27 to R-30, and made the current-folder tests remove `NoDefaultCurrentDirectoryInExePath` (R-31).
+- 2026-10-17 - `fake_harness.py` gained scenario fields for the harness_compose pack (`label`, per-launch `answers`, prompt-matched `replies`, `observe_files`, `write_files`) and a `marker` program, all read with defaults, so every scenario here behaves as before.

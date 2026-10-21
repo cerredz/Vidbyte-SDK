@@ -74,6 +74,7 @@ vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
   "skills/references/*.md",
   "skills/skills.json",
 ]
+"vidbyte.harnesses.native.compose" = ["prompts/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

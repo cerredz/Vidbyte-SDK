@@ -44,6 +44,7 @@ Architecture:
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
     - NativeThreadError: Raised by the Grok, opencode and Muse thread functions with a failure code, a likely cause and a next step.
+    - ThreadComposeError: Raised by the composite thread functions when git, a disposable worktree or a read-only phase fails, with a closed problem, a likely cause and a next step.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
@@ -60,8 +61,10 @@ from vidbyte.lib.enums.outputs import DeliveryStatus
 
 if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.agents import AgentMessage
+    from vidbyte.lib.dataclasses.native_compose import WorkspaceDiff
     from vidbyte.lib.dataclasses.outputs import DeliveryReceipt
     from vidbyte.lib.enums.failure import FailureCode
+    from vidbyte.lib.enums.native_compose import ThreadComposeProblem
     from vidbyte.lib.enums.native_threads import NativeHarness, NativeThreadOperation
 
 
@@ -610,4 +613,57 @@ class NativeThreadError(AgentExecutionError):
         self.repair_approaches = (next_step,)
         self.related_docs = ("vidbyte/harnesses/README.md",)
         self.relevant_tests = ("tests/features/harness_threads",)
+        super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
+
+
+class ThreadComposeError(AgentExecutionError):
+    """Carries one compose failure: a closed problem, the workspace, git's scrubbed text, the likely cause and the next step, plus the diff and the record so far."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        problem: ThreadComposeProblem,
+        workspace: str,
+        likely_cause: str,
+        next_step: str,
+        git_message: str | None = None,
+        diff: WorkspaceDiff | None = None,
+        result: object | None = None,
+    ) -> None:
+        # ComposeFailures in vidbyte/harnesses/native/compose/git.py has
+        # already composed and scrubbed the message, the workspace and
+        # git's text and picked the texts written for this problem, so
+        # this class only stores them. diff and result stay raw and are
+        # kept out of details, which hold only safe strings.
+        self.problem = problem
+        self.workspace = workspace
+        self.likely_cause = likely_cause
+        self.next_step = next_step
+        self.git_message = git_message
+        self.diff = diff
+        self.result = result
+        self.error_kind = problem.value
+        self.expected = "git snapshots, diffs and worktrees that succeed, and readers that leave the workspace unchanged"
+        self.actual = message
+        self.safe_runtime_details = {
+            "problem": problem.value,
+            "workspace": workspace,
+            "git_message": "" if git_message is None else git_message,
+        }
+        self.likely_causes = (likely_cause,)
+        self.repair_approaches = (next_step,)
+        self.related_docs = ("vidbyte/harnesses/README.md",)
+        self.relevant_tests = ("tests/features/harness_compose",)
         super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
