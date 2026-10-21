@@ -20,11 +20,11 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 | S2 tests | done | 2026-10-20 | 2026-10-20 | reports/S2-test-author.md | pack tests/features/agent_reasoning_effort (61 tests, 655 cases) + 3 pin appends; tests c6e5a710, docs 62b31d53. Orchestrator re-ran: 655 errors, all ImportError on the missing names; pins appended last; spec diff only §6.2 Proof cells |
 | S3 implement | done | 2026-10-20 | 2026-10-20 | reports/S3-implementer.md | head ce751768, PR #1193 draft. Orchestrator re-ran: tests unchanged vs 1fa23b65; pack + pins + modality routing 703 passed; contract --check current at 736; root names import; independent lint/run.py SDK-LINT: PASS (A002 602, S001 56; every zero-slack rule equal) |
 | S4 adversarial review | done | 2026-10-20 | 2026-10-20 | reports/S4-review-{conformance,conventions,engineering}.md, S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES. Confirmed 1 Blocker (R-1 algorithm-built runners drop the effort), 2 Major (R-2 non-text refusal tested only on image; R-3 Runner options overwrite), Minors R-4..R-10, 0 refuted. Orchestrator spot-checked multi_provider_agentic_grader.py:96,152 and utility.py:128-145 |
-| S5 repair loop | pending | | | | |
+| S5 repair loop | running | 2026-10-21 | | | spec r4 346f8c3e (R-1, R-3, R-7, R-9). S2b test additions 20b49e0c (pushed) = NEW TEST SNAPSHOT: orchestrator re-ran pack+pins+modality 25 failed / 723 passed (red set exactly AC-21..23, EC-31, method pin, 8 non-text, AC-26, AC-27, EC-36); test diff only inside the pack. Orchestrator satisfiability check: the verifier's scratch fixes turn 7 of 25 green, and the other 18 fail only on exact text (the verifier's draft text predates r4); the scratch tree was deleted. Iteration 1 next |
 | S6 PR | pending | | | | |
 
 ## Counters and caps
-- S1 review rounds: 2/2 · S5 repair iterations: 0/8 · S5 re-review rounds: 0/2
+- S1 review rounds: 2/2 · S5 repair iterations: 1/8 (running) · S5 re-review rounds: 0/2
 
 ## Decisions the orchestrator made
 - S4 ruling (orchestrator): R-1 is in scope. INV-3 and D-P9 say a set effort is never silently ignored, and the user asked that JevAgent have a reasoning effort; an effort that silently does nothing on three algorithms makes the requested behavior wrong. The fix is refusal at construction (INV-4, D-2 precedent); forwarding the effort into algorithm-built runners is [scope-adding] and becomes a Q (default No). Sequence, as in R3: (1) spec author revision r4 (R-1 §8.5 text, §9.2 rows, A-8, FR-7, §12.3 rows; R-3 row 9(b) + §17; R-7 §17 notes, INV-11 and AC-18; R-9 'a image' wording, done now because S2b re-pins that line anyway); (2) S2b test additions (R-1 per algorithm + positive control; R-2 four non-text types x keyword/options; R-3 options channel; R-4 chained restore; the R-9 pin); (3) S5 iteration 1 (R-1, R-3, R-9 code; R-5, R-6 docs). R-8 and R-10 go to S6.
@@ -65,3 +65,8 @@ Program: JevAgent in vidbyte-cli, run R2 of 8 (see request.md §C "This run's sc
 - From S2: the contract generator refuses uncommitted inputs, so commit vidbyte/__init__.py (row 27) before running row 28. Source: S2.
 - From S2: `AgentReasoningEffortGuard.refuse_unsupported` is a staticmethod with keyword-only (agent_name, runner_config, fallback). The four carriers take `reasoning_effort` keyword-only, default None. `runtime_config["reasoning_effort"]` is a plain str, written only when set. Refusal texts and details are compared exactly against §8.5. Source: S2.
 - From S2: the only fake in the pack is `Wire` on `HttpTransport.request` (or `transport=`). TypeSafe decision calls get 500, and Jev's gates fail open. Source: S2.
+- (S2b) The test-tree snapshot is now 20b49e0c. AC-24, AC-25 and EC-30 runs need replies each algorithm accepts (ALGORITHM_REPLIES in the fixtures).
+- (S2b) The preset grader (provider_models=None) picks its models from the environment at run time (models.py:418-429), so AC-25 sets run-time OPENAI/ANTHROPIC keys.
+- (S2b) AC-26, AC-29 and EC-35 read the built config through TextModelRunner._config, which has no public accessor (precedent test_provider_keys_agents.py:470).
+- (S2b) After S5 rewrites the non-text condition, mutate.py's N05 string no longer exists (it prints SKIPPED); the 4 keyword non-text cases still kill an image-only narrowing.
+- (S2b) refuse_algorithm_models runs AFTER refuse_unsupported (EC-31); the keyword wins over options (AC-29); options None is unset (EC-35).
