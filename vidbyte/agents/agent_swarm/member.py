@@ -152,6 +152,7 @@ class AgentSwarmMemberRuntime(AgentRuntime):
         return max(kept, 1)
 
     async def _compact(self, messages: list[dict[str, Any]], keep_last: int) -> CompactionStats | None:
+        # @intent a-failed-summary-keeps-the-history
         # Summarize everything older than the kept messages; a failed
         # summary call is reported and leaves the history as it was.
         try:

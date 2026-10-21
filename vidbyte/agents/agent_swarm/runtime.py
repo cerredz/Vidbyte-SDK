@@ -300,12 +300,18 @@ class AgentSwarmRuntime:
 
     async def request_compaction(self, name: str, focus: object) -> str:
         """Keep one pending compaction request for an agent, replacing an earlier one's focus, and return the compact tool's reply."""
+        # @intent one-pending-compaction-per-agent
+        # A second request before the iteration ends replaces the first
+        # one's focus, so one iteration compacts at most once.
         self._compaction_requests[name] = focus.strip() if isinstance(focus, str) else ""
         await self._events.flush()
         return self._texts[Prompt.AGENT_SWARM_COMPACT_REQUESTED]
 
     def take_compaction_request(self, name: str) -> str | None:
         """Remove and return an agent's pending focus ("" without one), or None when no request is pending."""
+        # @intent one-pending-compaction-per-agent
+        # Taking the request also clears it, so it compacts exactly one
+        # iteration and never a later one again.
         return self._compaction_requests.pop(name, None)
 
     def last_prompt_tokens(self, name: str) -> int | None:
