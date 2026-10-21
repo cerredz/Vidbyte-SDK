@@ -282,6 +282,7 @@ class BaseAgent(McpAttachableMixin):
         self.context_items = tuple(context_items)
         self.context_manager = context_manager
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
+        AgentReasoningEffortGuard.refuse_algorithm_models(agent_name=name, runner_config=self.runner_config, algorithm=self.algorithm)
         self.metadata = dict(metadata or {})
         self.output_schema = output_schema
         self.history: list[AgentMessage] = []
