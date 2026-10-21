@@ -1,258 +1,250 @@
-# Feature: AgentSwarm — user-defined agents that run their tools and message each other
+# Feature: AgentSwarm — agents with one shared prompt that run their tools, message each other freely, and compact their own histories
 
 ## High-Level Feature Description
 
-A developer defines two or more agents, each with a name, a model and a system prompt. The developer points them at one shared folder and calls `await AgentSwarm(settings).arun(goal)`. Every agent gets the same goal and works with `bash`, `grep`, `read_lines`, `write_text` and `patch_file` in that folder. An agent can `message` any other agent without waiting. A message reaches a busy agent between its tool calls as a new user message, and it wakes an idle agent. The swarm ends once no agent is working, as QUIET, MAX_TURNS (the turn budget is spent and a message is still waiting) or FAILED, or at the time limit. It returns the full ordered tuple of events.
+A developer names two or more agents, each with only a name, a provider and a model. The developer points them at one shared folder, optionally picks one web-search provider with its key, and calls `await AgentSwarm(settings).arun(goal)`. Every agent receives the same sectioned system prompt and the same goal, and works with `bash`, `grep`, `read_lines`, `write_text`, `patch_file`, `message`, `compact`, the selected search tool, and the loop's `isDone`. An agent can `message` any agent, itself included, without waiting. A message reaches a busy agent between its tool calls as a new user message and wakes an idle agent. An agent compacts its own history when it calls `compact`, or automatically when the provider reports a prompt at or above the trigger. The swarm ends once no agent is working (QUIET, MAX_TURNS, FAILED), when the swarm-wide token budget is reached (MAX_TOKENS), or at the time limit (TIMEOUT). It returns the full ordered tuple of events, twenty-four kinds in all.
 
-Under the hood, each agent runs one long-lived ordinary SDK loop for the whole swarm. One `AgentSwarmRuntime` per run coordinates the agents through four entry points: `post_message`, `collect_messages`, `end_turn` and `record_tool_call`. All coordination state changes inside synchronous blocks on one event loop.
+Under the hood, each agent runs one long-lived ordinary SDK loop for the whole swarm. One `AgentSwarmRuntime` per run coordinates the agents through its entry points (`post_message`, `collect_messages`, `end_turn`, `record_tool_call`, `record_tool_outcome`, `record_model_call`, `record_model_error`, `record_history_trim`, `request_compaction`, `record_compaction`). Three middleware sit in every member, in this order: the provider-boundary trim, the turn middleware, and the observer that records model calls, model errors and tool outcomes and refuses every model call once the swarm is stopping. A compaction rewrites the member's live history only in `AgentSwarmMemberRuntime._after_tool_iteration`, through the SDK's own `ContextCompactionEngine` with a summarizer that calls the member's own runner.
 
-The feature is a mailbox protocol, so its regressions look like the classic ones of distributed systems:
+The feature is a mailbox protocol with a budget and a history rewrite, so its regressions look like the classic ones of distributed systems and of context management:
 - a lost wake-up, which leaves a message sitting with an idle agent while the swarm ends QUIET;
-- a send that blocks on its recipient, which deadlocks two agents that message each other;
-- a double or misrouted delivery;
-- a "delivered" event recorded before its "sent";
-- an end check that misses an agent which returned early, so the swarm never ends;
-- an event stream with gaps or repeats, or one that reaches the callback out of order or twice at once.
+- a message that is neither delivered nor marked undelivered, or both;
+- a stop decision that lets one more paid model call through, or that leaves a parked agent waiting forever;
+- a compaction that cuts a tool call from its result, lands after the inbox message, loses the goal, or silently drops the history when the summary call fails;
+- a budget that never counts the compaction side call;
+- an event stream with gaps or repeats, fields set on the wrong kind, or deliveries to the callback out of order or twice at once.
 
 Each of these makes the swarm's data untrustworthy without any visible error. The tests here exist to make each one loud.
 
 ## Contract
 
 - **Imports.**
-  - `from vidbyte import AgentSwarm, AgentSwarmMember, AgentSwarmSettings, AgentSwarmEventKind, AgentSwarmStopReason` works.
-  - `vidbyte.agents.agent_swarm` and `vidbyte.agents` export `AgentSwarm`, `AgentSwarmSettings`, `AgentSwarmRuntime`, `AgentSwarmEvents`, `AgentSwarmWorkplace` and `AgentSwarmMemberRuntime`.
-  - `vidbyte.tools.toolsets` exports `AgentSwarmTools`.
-  - The records live in `vidbyte.lib.dataclasses.agent_swarm`.
-  - `AgentRuntimeType.AGENT_SWARM_MEMBER` resolves to `AgentSwarmMemberRuntime` (spec AC-17, §8.5).
+  - `from vidbyte import AgentSwarm, AgentSwarmMember, AgentSwarmSettings, AgentSwarmEventKind, AgentSwarmStopReason, AgentSwarmWebSearch` works.
+  - `AgentSwarmSettings` is one class, defined in `vidbyte.lib.dataclasses.agent_swarm` and re-exported by `vidbyte`, `vidbyte.agents` and `vidbyte.agents.agent_swarm` (AC-21).
+  - `vidbyte.lib.enums` exports `AgentSwarmWebSearch`, `AgentSwarmCompactionTrigger`, `AgentSwarmAgentState` and `AgentSwarmFolderState`.
+  - `vidbyte.tools.toolsets.AgentSwarmTools.search_tool_for(web_search, api_key)` builds the selected provider's search tool with the key inside its client.
+  - `AgentRuntimeType.AGENT_SWARM_MEMBER` resolves to `AgentSwarmMemberRuntime`, which refuses to build outside a swarm.
 - **Settings and the goal.**
-  - `AgentSwarmMember` and `AgentSwarmSettings` validate every field when they are built.
-  - A refusal is a `ConfigurationError` whose `details["field"]` names the field, raised before any folder is created.
-  - `AgentSwarm.arun` and `AgentSwarmRuntime.arun` refuse a blank or non-text goal the same way (AC-11, AC-18, INV-18).
+  - `AgentSwarmMember(name, provider, model_name)` has no prompt of its own.
+  - `AgentSwarmSettings` validates every field when built: 2 to 500 members with distinct names, a workplace that is not a file, `max_turns` of at least the number of members, `max_tokens` of at least one, `timeout_seconds` in (0, 2,592,000], a `web_search` that is an `AgentSwarmWebSearch` value with its key (and no key without it), a callable `on_event`, and model keys that match the members' providers (AC-19, AC-20, INV-18).
+  - A refusal is a `ConfigurationError` whose message and `details["field"]` name `AgentSwarmSettings.<field>`, never quote a key, and come before any folder is created.
+  - `AgentSwarm.arun` and `AgentSwarmRuntime.arun` refuse a blank or non-text goal the same way (INV-40).
 - **One run.**
-  - Each `arun` prepares the workplace folder, creating it with its parents but never deleting anything.
-  - It builds one fresh `AgentSwarmRuntime`, which builds fresh agents.
-  - It returns an `AgentSwarmResult(stop_reason, events, replies, event_error_types)`.
-  - A second concurrent `arun` on one `AgentSwarm` is refused. An `AgentSwarmRuntime` runs only once (AC-15, AC-16, INV-19, INV-20).
+  - Each `arun` prepares the workplace folder (`AgentSwarmWorkplace.prepare()` returns whether it created it), builds one fresh `AgentSwarmRuntime(settings, root, workplace_created=...)`, and returns an `AgentSwarmResult(stop_reason, events, replies, event_error_types)`.
+  - A second concurrent `arun` on one `AgentSwarm` is refused. An `AgentSwarmRuntime` runs only once.
 - **What each agent sees.**
-  - Its model sees the goal as the prompt of every call.
-  - It holds exactly `bash`, `grep`, `read_lines`, `write_text`, `patch_file`, `message` and `isDone`, plus the developer's search tool when one is given.
-  - Its system prompt is its own prompt, then the swarm prompt, then the loop's agentic-loop prompt (AC-13, AC-14, INV-1, INV-21).
+  - Its model sees the goal as the prompt of every call, never in `messages`.
+  - Its tools are exactly `bash`, `grep`, `read_lines`, `write_text`, `patch_file`, `message`, `compact`, the selected search tool when any, and `isDone`, in that order (INV-38, AC-2).
+  - Its system prompt is the nine section leaves (web search only when selected) joined by blank lines, then the loop's agentic-loop prompt. Every member gets the same template; only its own name, its peers, the workplace and the search tool name are substituted (INV-1).
 - **Messages.**
-  - `message(to, text)` returns as soon as the message is queued.
-  - A message reaches a working recipient after its next tool iteration, or at its turn end. At that point every waiting message is delivered as one user message labeled with each sender, in acceptance order.
-  - A message wakes an idle recipient when the turn budget allows.
-  - Blank text, self, unknown and failed recipients are refused as tool errors (AC-2, AC-3, AC-9, AC-20, INV-4…INV-8).
+  - `message(to, text)` returns as soon as the message is queued. Its `to` schema has no `enum`; its description names every member.
+  - Exactly two inputs are refused, as tool errors with one `message_refused` event: a name that is not a member (any non-string included) and blank text (INV-5, AC-4, EC-1).
+  - A message to oneself is queued like any other (AC-3, EC-2, EC-3).
+  - A message to a failed or exited member, or sent after the stop is decided, is a successful call recorded as `message_sent` then `message_undelivered` (INV-6, AC-5, EC-4).
+  - Every `message_sent` gets exactly one later `message_delivered` or `message_undelivered` (INV-7, AC-7).
 - **Ending.**
-  - The swarm ends exactly when no agent is working.
-  - The stop reason is FAILED when every agent failed; otherwise MAX_TURNS when an idle running agent still holds mail; otherwise QUIET.
-  - TIMEOUT is a hard stop that overrides the others.
-  - `replies` holds each released agent's last reply in member order, and is empty on TIMEOUT and FAILED (AC-4…AC-8, INV-9…INV-12).
+  - The stop reason is decided once, in one block that records `swarm_stopping`, marks every still-queued message undelivered, and releases every parked agent (INV-12).
+  - QUIET, MAX_TURNS and FAILED are decided when nobody works; MAX_TOKENS in the block that records the `model_called` crossing the budget; TIMEOUT after the task group ends on the time limit, after `agent_cancelled` for every member still working.
+  - After the decision no model call starts: the observer refuses `before_model_call` (INV-13, AC-9).
+  - Every agent ends with exactly one of `agent_released`, `agent_cancelled`, `agent_failed`, `agent_exited` (INV-14).
+  - `replies` holds each released agent's reply in member order.
 - **Events.**
-  - Events are numbered 1..N with no gap or repeat, in true causal order, ending with the one `SWARM_ENDED`.
-  - `on_event` (sync or async) is called once per event, in order, never twice at once.
-  - Callback exceptions are contained and their type names are listed (AC-10, AC-19, INV-13…INV-16).
-- **Failures.** One agent's contained failure becomes one `AGENT_FAILED` event that names the root cause, and the others continue. A tool exception is a tool error, not a failure (AC-7, AC-8, INV-17, EC-12…EC-16).
+  - `workplace_prepared` is first, then `agent_created` per member, then `agent_started` per member (INV-17, INV-28, AC-2).
+  - Events are numbered 1..N with no gap or repeat; exactly one `swarm_stopping` with the result's reason precedes the one last `swarm_ended` (INV-16).
+  - Each kind sets exactly its own fields (INV-21, the twenty-four-row `_KIND_FIELDS` table).
+  - Model calls (`model_called`, `model_error`), trims (`history_trimmed`), tool outcomes (`tool_result_truncated`, `file_changed`, `command_failed`) and compactions (`compaction`) are recorded per agent (INV-22…INV-27).
+  - `on_event` (sync or async) is called once per event, in order, never twice at once; callback exceptions are contained and listed.
+- **Compaction.**
+  - `compact(focus?)` records a request and returns at once. The next `_after_tool_iteration` summarizes everything older than the kept newest groups through one side call on the member's runner, before any mail is appended (INV-30…INV-35, AC-16).
+  - The automatic trigger is the member's last reported `total_prompt_tokens` at or above `AGENT_SWARM_COMPACTION_TRIGGER_TOKENS` (AC-17).
+  - A failed summary call records `model_error`, keeps the history, and never fails the member (AC-18).
 
 ## Actors / Callers
 
 - SDK callers who build `AgentSwarm(AgentSwarmSettings(...))` and await `arun(goal)`, optionally with an `on_event` callback.
 - The model inside every member agent, which calls the swarm's tools.
-- `AgentSwarmRuntime`'s three member-side callers: the member loop (`collect_messages`), the turn middleware (`end_turn`, `record_tool_call`) and the `message` tool (`post_message`).
+- The member-side callers of `AgentSwarmRuntime`: the member loop (`collect_messages`, compaction), the turn middleware (`end_turn`, `record_tool_call`), the observer and trim middleware, and the `message` and `compact` tools.
 - A plain `BaseAgent` or a fork that asks for `runtime="agent_swarm_member"`, and must be refused.
 
 ## Inputs and Preconditions
 
 - Two to `AGENT_SWARM_MAX_AGENTS` members with distinct names that match `AGENT_SWARM_NAME_PATTERN`.
 - A workplace path that is not a file.
-- A model each member's provider can run.
-- Optionally `api_keys`, one search `BaseTool`, an `on_event` callable, `max_turns` of at least the number of agents, and `timeout_seconds` in (0, 604800].
-- The tests use `tmp_path` for every folder, a scripted model runner, the real filesystem and real `asyncio`.
+- A model each member's provider can run, and `api_keys` that the providers accept.
+- Optionally `web_search` with `web_search_api_key`, an `on_event` callable, `max_turns` of at least the number of agents, `max_tokens` of at least one, and `timeout_seconds` in (0, 2,592,000].
+- The tests use `tmp_path` for every folder, a scripted model runner, a recording fake in place of the Tavily HTTP call, the real filesystem and real `asyncio`.
 - `bash` cases need a POSIX bash (Linux CI) or Git for Windows bash locally.
 
 ## Observable Outcomes
 
-- **What each agent's model was sent:** `prompt`, `system`, `messages`, the offered tool names, schemas and descriptions.
+- **What each agent's model was sent:** `prompt`, `system`, `messages`, the offered tool names, schemas and descriptions; a compaction's side call is one more recorded call whose `system` is the summarizer prompt, whose `prompt` is the transcript, and which offers no tools.
 - **Tool results:** they arrive as tool messages in the next call.
-- **The result:** `result.stop_reason`, `result.events`, `result.replies` (`AgentMessage.sender` / `.content`) and `result.event_error_types`.
+- **The result:** `result.stop_reason`, `result.events`, `result.replies` and `result.event_error_types`.
 - **Callback output:** the sequence of events the `on_event` callback received.
 - **The disk:** the files under the workplace.
 - **Errors raised:** `ConfigurationError` (with `details["field"]`), `AgentExecutionError` (with `__cause__`) and `asyncio.CancelledError`.
 
 ## State Transitions
 
-**Per agent** (spec §9.1):
-- `Working → Working`: the turn ends with mail waiting and budget left; it records `AGENT_IDLE` then `AGENT_WOKE`.
-- `Working → Idle`: records `AGENT_IDLE`.
-- `Idle → Working`: a message is accepted and budget is left; it records `AGENT_WOKE`.
-- `Idle → Done`: the swarm ends QUIET, MAX_TURNS or FAILED, and the agent is released.
-- `Working → Failed`: records `AGENT_FAILED`.
-- `Idle → Failed`: an unrequested `CancelledError` is raised while the agent's own `AGENT_IDLE` is delivered (EC-39, r4); records `AGENT_FAILED`.
-- `Working/Idle → Cancelled`: the time limit is reached.
+**Per agent** (spec §9.1): `created → started (working) → (idle ⇄ working)* → released | cancelled | failed | exited`.
+- `working → idle`: records `agent_idle`.
+- `idle → working`: a message is accepted with budget left, or the turn ended with mail waiting and budget left; records `agent_woke`. With the budget spent it records `wake_refused` instead and stays idle.
+- `working | idle → released`: the run returned after the stop was decided; records `agent_released`.
+- `working | idle → cancelled`: the swarm's own cancel (the time limit); records `agent_cancelled` with `agent_state`.
+- `working | idle → failed`: an SDK error or a stray cancel; records `agent_failed` and marks its inbox undelivered.
+- `working → exited`: the run returned on its own before the swarm decided (for example `middleware_abort` from a raising recording hook); records `agent_exited` and marks its inbox undelivered.
 
-**Per swarm:** `Ready → Running → Ready`. An `AgentSwarmRuntime` goes `New → Running → Ended` and is never reused.
+**Per swarm:** `prepared → running → stopping(reason) → ended(reason)`. An `AgentSwarmRuntime` goes `New → Running → Ended` and is never reused.
 
-**Per message:** `accepted (MESSAGE_SENT) → delivered once (MESSAGE_DELIVERED)`, or left undelivered only when the recipient failed or the swarm ended MAX_TURNS or TIMEOUT.
+**Per message:** `refused` (never queued), or `sent → delivered once`, or `sent → undelivered once` (recipient failed or exited, or the stop was decided before delivery).
+
+**Per member history:** `growing → compacted (summary + kept newest groups)`, only between a tool iteration's results and its mail.
 
 ## Invariants
 
-These are checked on every run by `assert_event_invariants` in `agent_swarm_fixtures.py`, the pack's oracle. They are also checked on random schedules by `test_agent_swarm_property.py`.
+These are checked on every run by `assert_event_invariants` in `agent_swarm_fixtures.py`, the pack's oracle, and on random schedules by `test_agent_swarm_property.py`.
 
-**Sequence and ending**
-- `sequence` runs 1..N in order. Exactly one `SWARM_ENDED` exists; it is last, its agent is `""`, and its stop reason equals the result's.
-- The first events are one `AGENT_STARTED` per member, in member order.
+**Sequence and start**
+- `sequence` runs 1..N in order; `elapsed_ms` is a whole number that never decreases.
+- The run starts `workplace_prepared`, then `agent_created` per member in member order, then `agent_started` per member in member order.
+- Exactly one `swarm_stopping` exists, with the result's stop reason; exactly one `swarm_ended`, last, with the same reason. Their agent and `workplace_prepared`'s agent are `""`; every other event names a member.
+- Every field the `_KIND_FIELDS` table does not list for a kind keeps its default.
 
 **Lifecycle**
-- Each agent's lifecycle events read `STARTED (IDLE WOKE)* [IDLE | FAILED]`. The oracle lets an agent fail only while working; spec r4's EC-39 idle variant fails an idle agent (`IDLE` then `FAILED`, which INV-14 allows), so that one test checks its events directly instead of calling the oracle.
-- An agent's `TOOL_CALLED`, `MESSAGE_SENT` and `MESSAGE_DELIVERED` events happen only while it is working.
-- Nothing follows its `AGENT_FAILED`.
+- Each agent goes `created → working → (idle ⇄ working)* → one terminal event`. Tool calls, model calls, sends, refusals, deliveries, trims and compactions happen only while it is working. Only `message_undelivered` for it may follow its terminal event.
+- `agent_released` comes only after `swarm_stopping`; `agent_exited` only before it.
+- After `swarm_stopping` nobody wakes, nothing is delivered, and no wake is refused.
 
 **Messages**
-- A `MESSAGE_SENT` has `message_id == sequence`.
-- Every `MESSAGE_DELIVERED` names an earlier `MESSAGE_SENT` with sender and recipient swapped.
-- No message is delivered twice.
-- Deliveries to one recipient follow acceptance order.
+- A `message_sent` has `message_id == sequence`, names any member (the sender included), and carries non-blank text.
+- Every `message_sent` has exactly one later `message_delivered` or `message_undelivered` with the same id, sender and recipient swapped. Deliveries to one recipient follow acceptance order.
+- A send to a failed or exited recipient, or after the stop, is followed at once by its `message_undelivered`.
+- A send to an idle recipient before the stop is followed at once by `agent_woke` (budget left) or `wake_refused` (budget spent). A turn end with mail waiting is followed at once by `agent_woke` (budget left) or by one `wake_refused` per waiting message.
+- `swarm_stopping` is followed at once by one `message_undelivered` per message still queued for a running agent, in member order.
 
-**Turns and stop reasons**
-- Turns started (`STARTED` + `WOKE`) are at most `max_turns`.
-- QUIET or FAILED: every message to a non-failed agent was delivered.
-- MAX_TURNS: some message to a non-failed agent was not delivered, and the budget is exactly spent.
-- FAILED holds exactly when every agent failed.
+**Derived events**
+- `tool_result_truncated`, `file_changed` and `command_failed` follow their agent's own `tool_called` for the matching tool; `file_changed` names an absolute path and the previous different writer of that path.
+- `model_called` counts never go negative and the loop's model call count never decreases per agent; `compaction` follows its agent's own `model_called` for the side call.
 
-**Replies and fields**
-- On QUIET or MAX_TURNS, `replies` holds one reply per non-failed agent, in member order, whose content is that agent's last `AGENT_IDLE` text. On TIMEOUT and FAILED it is empty. The one exception is EC-18 (r4): when the time limit fires after the end was decided, `replies` may miss the agent it cut, so that test checks a subset and the `AGENT_IDLE` texts instead of calling the oracle.
-- `elapsed_ms` is a whole number that never decreases.
-- Every field the §9.1 table does not list for a kind keeps its default.
+**Turns, stop reasons and replies**
+- Turns started (`agent_started` + `agent_woke`) never pass `max_turns`.
+- QUIET, MAX_TURNS, FAILED: nobody is working at `swarm_stopping`. QUIET leaves nothing undelivered at the stop; MAX_TURNS spends the budget exactly and every message undelivered at the stop had its `wake_refused`; FAILED holds exactly when every agent failed or exited first.
+- MAX_TOKENS: `swarm_stopping` directly follows the `model_called` that crossed the budget. TIMEOUT: every agent's terminal event precedes `swarm_stopping`.
+- `replies` holds exactly the released agents, in member order; on QUIET and MAX_TURNS each reply is that agent's last `agent_idle` text.
 
 **The callback**
-- On QUIET, MAX_TURNS or FAILED, the `on_event` callback received exactly `result.events`.
-- On TIMEOUT it received an increasing subsequence that ends with `SWARM_ENDED`.
+- Except on TIMEOUT, the `on_event` callback received exactly `result.events`; on TIMEOUT an increasing subsequence that ends with `swarm_ended`. Never two deliveries at once.
 
 ## External Dependencies
 
 - The local filesystem (real, under `tmp_path`).
-- `bash` (a real subprocess).
-- The model runner: the only fake, patched at `BaseAgent._runner_for_model` so it reaches every member built inside `arun`.
-- The prompt catalog (real).
-- `asyncio` (real). Ordering is controlled with `Gate`, `Signal` and events the `on_event` callback observes, never with timed sleeps. The one timed wait is in `test_event_time_counts_from_arun_not_from_building_the_runtime`, where the time between building the runtime and calling `arun` is itself under test (D-16).
+- `bash` (a real subprocess); the timeout case lowers the bash tool's module-level timeout and runs a busy loop, so nothing waits on a timer.
+- The model runner: the only model fake, patched at `BaseAgent._runner_for_model` so it reaches every member built inside `arun`, and the compaction side call through `AgentSwarmMemberAgent.call_model`. It stamps each response with the member's own provider and model, so Anthropic usage is parsed by Anthropic's parser.
+- Web search: `TavilyClient.search` (the HTTP boundary) is replaced by a recording fake; the swarm, the toolset and `TavilySearchTool` are real.
+- The prompt catalog, the compaction engine, the middleware pipeline and `AgentSwarmEvents` (all real).
+- `asyncio` (real). Ordering is controlled with `Gate`, `Signal` and events the `on_event` callback observes, never with timed sleeps. The one timed wait is in `test_event_time_counts_from_arun_not_from_building_the_runtime`, where the time between building the runtime and calling `arun` is itself under test.
 
 ## Known Failure Modes
 
 Each line is *input + state → wrong output if unguarded*, with the test that catches it.
 
+**The shared prompt and the tools**
+- A member still gets a per-agent prompt, two members get different templates, the web-search section appears without a provider, a placeholder is left unformatted, or the loop prompt is not last (`test_every_member_gets_the_same_sectioned_system_prompt_then_the_agentic_loop_prompt`, `test_the_section_4_snippet_runs_as_written`).
+- A leaf states a number, has fewer sentences than the spec asks, misses a thoroughness heading, or has a stray format field (`test_prompt_family_has_exactly_the_twenty_three_documented_leaves_with_their_fields`, `test_prompt_leaves_hold_no_digits_roles_or_examples`, `test_the_thoroughness_section_has_the_eight_headings_each_six_to_eight_sentences`).
+- An agent misses `compact` or the search tool, holds them in the wrong order, or the `to` schema still declares an `enum` (`test_each_agent_holds_exactly_the_swarm_tools_and_a_message_schema_naming_every_agent`, `test_three_members_are_created_then_started_in_order_with_the_search_tool_before_isdone`).
+
 **Messaging and wake-ups**
-- A message sent while the recipient is between its inbox check and becoming idle is queued without a wake. The swarm then ends with mail undelivered, or never ends (`test_a_message_accepted_while_the_recipient_is_going_idle_is_never_lost`).
-- `message` waits for the recipient: the sender stalls behind a long tool call (`test_a_message_to_a_working_agent_arrives_after_its_tool_result_without_blocking_the_sender`), and two agents messaging each other deadlock (`test_two_agents_messaging_each_other_mid_turn_never_deadlock`).
-- A message to a busy agent is delivered only at its turn end, or is put into the system prompt instead of after the tool result (`test_a_message_to_a_working_agent_arrives_after_its_tool_result_without_blocking_the_sender`).
-- Messages that waited together are delivered as separate user messages, in completion order, or without sender labels (`test_messages_queued_before_one_delivery_point_arrive_together_in_acceptance_order`).
-- An idle agent is not woken, or is woken by a new `arun`, which loses its history. The wake message lands before the agent's previous reply. After an `isDone` finish the agent is not woken at all (`test_a_message_wakes_an_idle_agent_into_a_new_turn_after_its_previous_reply`).
-- An agent that ends its turn with mail waiting goes idle and waits for another send (`test_an_agent_that_ends_its_turn_with_mail_waiting_continues_at_once`).
-- Self, unknown, `"all"` or blank sends are queued, recorded as sent, or crash the loop (`test_a_refused_message_is_a_tool_error_queues_nothing_and_the_loop_continues`).
-- Message text is passed through `str.format`, cut, or stripped: braces raise or get substituted, and long or unicode text arrives changed (`test_message_text_reaches_the_recipient_whole_and_unformatted`).
+- A self-message is refused, or never delivered (`test_a_message_to_oneself_is_accepted_and_delivered_at_the_next_tool_iteration`, `test_a_self_message_before_a_plain_reply_wakes_the_sender_at_once`).
+- An unknown name or blank text is queued, recorded as sent, or records no `message_refused` (`test_a_refused_message_is_a_tool_error_queues_nothing_and_the_loop_continues`).
+- A message to a failed peer is a tool error, or is queued and never resolved (`test_a_provider_error_fails_only_that_agent_names_its_cause_and_stops_its_mail`).
+- A send to an idle peer with the budget spent records no `wake_refused`, or its message is never marked undelivered (`test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_message_undelivered`).
+- The lost wake-up, the blocking send, the misordered batch and the formatted text of r5 (`test_a_message_accepted_while_the_recipient_is_going_idle_is_never_lost`, `test_two_agents_messaging_each_other_mid_turn_never_deadlock`, `test_messages_queued_before_one_delivery_point_arrive_together_in_acceptance_order`, `test_message_text_reaches_the_recipient_whole_and_unformatted`).
 
-**Turns and limits**
-- Turn-budget exhaustion still wakes agents, ends QUIET with mail waiting, or cancels working agents (`test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_message_undelivered`). A budget check also wrongly blocks mid-turn delivery (`test_a_message_to_a_working_agent_arrives_after_its_tool_result_without_blocking_the_sender[budget-spent]`).
-- The time limit waits for a model call that never answers, raises instead of returning, or leaves member tasks running (`test_the_time_limit_cancels_every_agent_and_returns_timeout`).
-- The time limit cuts the task delivering an event, and that event is then repeated or `SWARM_ENDED` is never delivered (`test_the_time_limit_cuts_a_slow_callback_once_and_still_delivers_swarm_ended`, `test_a_flush_cancelled_mid_callback_never_repeats_that_event`).
-- The time limit fires after the end was already decided and overwrites the decided stop reason with TIMEOUT (`test_the_time_limit_firing_after_the_end_was_decided_keeps_the_decided_stop_reason`).
-- Event time counts from building the runtime instead of from `arun`, so a delay before the run leaks into every `elapsed_ms` (`test_event_time_counts_from_arun_not_from_building_the_runtime`).
-- A huge tool result reaches the model uncut, or a long conversation is sent untrimmed and outgrows the model's context (`test_tool_results_are_cut_and_a_long_history_is_trimmed_before_each_model_call`).
+**The budget and the stop path**
+- A model call's usage is not recorded, or recorded with the wrong counts (`test_a_model_response_records_model_called_with_its_counts_and_grows_the_budget`).
+- The budget stop lets another member make one more paid call, leaves a parked agent waiting, or records the stop late (`test_crossing_the_token_budget_stops_the_swarm_in_the_same_block_and_refuses_every_later_call`, `test_the_first_response_crossing_the_budget_refuses_every_other_first_call`).
+- A member in the middle of a long tool call when the stop is decided makes another model call, or is cancelled instead of released (`test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_without_another_model_call`).
+- A send whose response was in flight when the stop was decided is lost or delivered (`test_a_send_after_the_stop_is_decided_is_sent_then_undelivered_with_the_stopped_reply`).
+- A model error the loop retries is not recorded, or the observer's hook changes the retry decision (`test_a_retried_model_error_is_recorded_before_the_retry_and_the_agent_keeps_working`).
+- A provider that reports no usage crashes the observer or trips the budget (`test_missing_usage_records_zeros_and_never_trips_the_budget`).
+- The time limit leaves an agent with no ending, fails it, or labels a parked agent as working (`test_the_time_limit_cancels_every_agent_and_returns_timeout`, `test_the_time_limit_labels_working_and_idle_agents_and_fails_none`).
+- A recording bug fails the agent instead of exiting it, or leaves its inbox unresolved (`test_a_turn_middleware_recording_bug_exits_only_that_agent_naming_the_middleware_abort`).
 
-**Failures**
-- A provider error stops the whole swarm, or `AGENT_FAILED` reads only the generic "failed to generate a reply" wrapper. A later message to the failed agent is queued (`test_a_provider_error_fails_only_that_agent_names_its_cause_and_stops_its_mail`).
-- Every agent failing reads as QUIET, or returns replies (`test_every_agent_failing_ends_failed_with_no_replies`).
-- Mail left in a failed agent's inbox is counted as undelivered work, so a swarm that should end QUIET ends MAX_TURNS (`test_mail_left_for_an_agent_that_failed_does_not_turn_quiet_into_max_turns`).
-- A `CancelledError` the swarm never requested (raised by a tool, or by an async `on_event` while that agent's own event is delivered) kills the member task silently; the agent stays counted as working and the swarm waits out the whole time limit. In the idle variant a peer's message wakes a dead task (`test_a_cancelled_error_raised_by_a_tool_fails_that_agent_instead_of_waiting_for_the_time_limit`, `test_a_cancelled_error_raised_by_on_event_while_an_agent_works_fails_that_agent`, `test_a_cancelled_error_raised_by_on_event_on_an_idle_agent_fails_it_instead_of_waking_it`). The opposite mistake fails an agent the swarm already released: a cancel that arrives after the end was decided gets an AGENT_FAILED (`test_an_unrequested_cancel_after_the_end_was_decided_does_not_fail_the_released_agent`).
-- The end check does not run on a failure, so a swarm whose last working agent fails hangs (`test_the_last_working_agent_failing_ends_the_swarm_without_a_hang`).
-- A tool exception is treated as an agent failure (`test_an_exception_inside_a_tool_is_a_tool_error_not_a_failure`). A tool name the model invents with a newline in it fails the agent through the event record instead of coming back as a tool error (`test_a_tool_name_holding_a_newline_is_a_tool_error_not_a_failure`).
-- An early return from a member run is mistaken for a normal release, so the agent never leaves the working set and the swarm hangs. Or a turn-middleware bug is swallowed (`fail_closed` turned off) and `TOOL_CALLED` events go missing silently (`test_a_turn_middleware_recording_bug_fails_only_that_agent_naming_the_middleware_abort`).
+**Tool outcomes and the trim**
+- A long history is sent untrimmed, or the trim records the wrong count (`test_a_trimmed_history_records_history_trimmed_with_the_dropped_count`).
+- A result over the cap reaches the model uncut, or its truncation is unrecorded or off by one at the cap (`test_a_tool_result_over_the_cap_records_its_omitted_chars_and_one_at_the_cap_records_nothing`).
+- Two agents writing one file are not reported as a collision, or a relative `patch_file` path is a different key (`test_two_agents_writing_one_file_record_file_changed_naming_the_previous_writer`); a refused write still reports a change (`test_a_refused_write_records_no_file_changed`).
+- A non-zero exit or a bash timeout is silent, or a zero exit is reported (`test_a_non_zero_exit_and_a_timeout_record_command_failed_and_a_zero_exit_records_none`).
 
-**Runs, cancellation and workplace**
-- A second concurrent `arun` interleaves two event streams that each start at 1. A later `arun` reuses the previous agents' history (`test_a_second_concurrent_arun_is_refused_and_a_later_arun_starts_fresh`). An `AgentSwarmRuntime` runs twice (`test_a_swarm_runtime_runs_only_once`).
-- Cancelling `arun` is swallowed, or leaves the in-progress flag set so the swarm can never run again (`test_cancelling_arun_propagates_and_the_swarm_can_run_again`).
-- The workplace is created at construction, cleaned at start, or deleted at the end. An existing file there is overwritten (`test_constructing_the_swarm_or_its_runtime_creates_no_folder`, `test_a_missing_workplace_is_created_with_its_parents_and_the_agents_files_stay`, `test_a_second_run_on_the_same_workplace_sees_earlier_files_and_user_files_stay_byte_identical`).
-- A file that appears at the workplace path, or a parent that is a file, crashes with a raw `OSError` after agents were built (`test_a_file_that_appears_at_the_workplace_path_is_refused_before_any_model_call`, `test_a_workplace_that_cannot_be_created_is_refused_with_the_os_error_as_cause`).
-- The file tools are rooted somewhere other than the workplace, so `../` escapes are accepted (`test_file_tools_refuse_paths_outside_the_workplace_and_change_nothing_there`).
+**Compaction**
+- `compact` rewrites the history mid-iteration, splits a tool call from its result, puts the inbox message before the summary, sends the summary call without the focus, or never counts the side call (`test_compact_with_a_focus_summarizes_older_history_before_mail_through_the_member_runner`).
+- The automatic trigger fires below the threshold, never fires, or reads output tokens; an Anthropic prompt held in its cache buckets never triggers (`test_a_prompt_at_the_trigger_compacts_automatically_and_one_below_does_not`, `test_anthropic_cache_buckets_count_toward_the_trigger`).
+- A request and the trigger in one iteration compact twice; two requests in one response compact twice (`test_a_pending_request_and_the_trigger_in_one_iteration_compact_once_as_tool`, `test_two_compact_calls_in_one_response_compact_once_with_the_last_focus`).
+- A failed summary call drops the history, fails the member, or swallows the mail (`test_a_failed_summary_call_keeps_the_history_delivers_mail_and_the_member_runs_on`).
+- A blank summary aborts the compaction; nothing older still makes a paid call (`test_a_blank_summary_still_compacts_with_the_prefix_only`, `test_compact_with_nothing_older_makes_no_side_call_and_no_event`).
+- A side call that crosses the budget loses its compaction or lets the member call the model again (`test_a_summary_call_crossing_the_budget_completes_the_compaction_then_releases`).
 
-**Events and the callback**
-- A raising `on_event` stops the swarm, turns the `message` call into a tool error, or skips later events. An async callback is never awaited (`test_a_raising_on_event_callback_never_stops_the_swarm`).
-- Concurrent flushes deliver an event twice, out of order, or call the callback twice at once (`test_the_event_outbox_delivers_each_event_once_in_order_even_with_concurrent_flushes`, every property test).
-- `TOOL_CALLED` is recorded for `isDone`, is missing the status, or is missing for failed tool calls (`test_tool_called_events_carry_name_and_status_and_skip_isdone`).
-- Any scheduling-dependent ordering bug: a delivery before its send, a delivery to an idle agent, a lost or duplicated message, a non-monotonic sequence, or replies out of member order (`test_random_schedules_keep_every_event_invariant_and_end_quiet`, `test_random_schedules_under_a_tight_turn_budget_end_quiet_or_max_turns_by_the_rules`, `test_random_schedules_with_one_failing_agent_contain_the_failure`).
-
-**Prompts, tools and settings**
-- The goal is stripped, formatted, or sent only once, so later turns lose it. A turn starts a new conversation. The system prompt changes between turns (`test_every_agent_gets_the_goal_verbatim_as_the_prompt_of_every_call_in_one_conversation`).
-- The member prompt is passed through `str.format`, so braces in it raise or get substituted. The swarm prompt lands before the member's own prompt or after the loop prompt (`test_each_system_prompt_is_own_prompt_then_swarm_prompt_then_agentic_loop_prompt`).
-- An agent holds a tool twice, misses `message`, offers itself as a recipient, or the search tool leaks to agents when none was given (`test_each_agent_holds_exactly_the_swarm_tools_and_a_message_schema_of_its_peers`).
-- A refused setting creates the folder, or names no field (`test_invalid_settings_are_refused_naming_the_field_and_creating_nothing`). A search tool named `isDone` is accepted and then silently replaced by the loop's own `isDone` (`test_a_search_tool_named_isdone_is_refused_naming_the_reserved_names`). A boundary value is refused (`test_boundary_settings_are_accepted_with_documented_defaults`).
-- An API key appears in the settings `repr`, an event, a model call, or a refusal (`test_api_keys_never_appear_in_reprs_events_model_calls_or_errors`).
-- The `agent_swarm_member` runtime builds without a swarm and calls the model unguarded (`test_runtime_type_refuses_outside_a_swarm_without_calling_a_model`).
-- A prompt leaf states a number, a role or an example, or a leaf has a stray format field that makes `.format` raise at run time (`test_prompt_family_has_exactly_the_ten_documented_leaves_with_their_fields`, `test_prompt_leaves_hold_no_digits_roles_or_examples`).
-- A polling loop (`asyncio.sleep`) is used for the end check, or the package outgrows its budget (`test_new_modules_stay_inside_the_complexity_budget_and_never_sleep`).
+**Runs, workplace, settings and events**
+- The workplace's first event is missing or misreports whether the folder was created (`test_the_first_event_reports_whether_the_run_created_the_workplace`).
+- A refused setting creates the folder or names no field; a web-search key leaks into a `repr`, an event, a model call or a refusal (`test_invalid_settings_are_refused_naming_the_field_and_creating_nothing`, `test_web_search_settings_without_a_key_with_a_dangling_key_or_an_unknown_provider_are_refused`, `test_web_search_key_never_appears_in_reprs_events_model_calls_or_errors`).
+- An event of a new kind sets a field it does not own, or a result without its `swarm_stopping` is accepted (`test_event_records_accept_each_kinds_own_fields`, `test_event_records_refuse_fields_of_other_kinds_and_bad_values`, `test_result_records_refuse_broken_event_streams`).
+- Every r5 failure mode for concurrent runs, cancellation, the outbox and the callback keeps its r5 test in `test_agent_swarm_lifecycle.py`.
 
 **What an easy generated test would miss:**
 - concurrency "proven" by timing instead of a gate;
-- a wake tested only when the message happens to arrive after the idle mark, never during the step that marks it;
-- delivery checked by counting events instead of reading the recipient's next model call;
-- "no duplicates" checked on events but not on what the model saw;
+- a budget stop checked only by its stop reason, never by the scripted calls that were not answered;
+- a compaction checked only by its event, never by the summary call's system, prompt and empty tool list, or by the next call's history;
+- an Anthropic usage path that is never parsed as Anthropic because the fake stamps every response OpenAI;
 - a TIMEOUT test where nothing was actually blocked;
-- a failure test that only asserts `AGENT_FAILED` exists, not that it names the cause;
-- `on_event` checked only with a sync callback.
+- a failure test that only asserts `agent_failed` exists, not that it names the cause.
 
 ## Historical Regressions
 
-None yet. The pack was written red, before the implementation, from spec r3 (S2 test author). These spec-review findings shaped specific tests:
+None yet in v2. The r5 pack was written red from spec r3 of `docs/spec/agent-swarm/` and hardened by S4 mutants M2, M7, M21 and M22; those gap tests stay. This revision (spec `docs/spec/agent-swarm-v2/` r3) reverses these r5 decisions, and each test that pinned one was rewritten to the new value rather than removed:
 
-| Finding | What changed in the pack |
-|---|---|
-| R-1 | `AGENT_FAILED` names the `__cause__` type, not the wrapper. |
-| R-2 | `isDone` and the agentic-loop prompt are in every call. |
-| R-6 | Gates come from `on_event` signals, not from "answered" marks. |
-| R-8 | The member runtime's refusal is checked through `_runtime()` and through `arun`'s `__cause__`. |
-| R-9 | A recording bug aborts the run through the fail-closed middleware. |
-| R-11 | Uncontained exceptions; see the omitted strategies. |
-| S4 R-2 | A search tool named `isDone` is refused (spec r4). |
-| S4 R-3 | An unrequested `CancelledError` fails its agent: three EC-39 tests (spec r4). |
-| S4 R-5 | Mutants M2, M7, M21 and M22 survived the pack; one gap test now kills each (EC-12/INV-10, EC-18, EC-26). |
-| S4 R-8 | `TOOL_CALLED` records any non-blank tool name (spec section 9.1), so a newline in a model-made name is a tool error. |
-| S4 R-11 | Event time starts in `arun` (D-16). |
-| S4 R-14 | `replies` may be partial under EC-18 (spec r4); the EC-18 test checks a subset. |
+| Reversed decision | Spec | Tests rewritten |
+|---|---|---|
+| Per-member `system_prompt` | FR-1, INV-1 | field lists, prompt order, §4 snippet, fixtures `member()` |
+| Self and failed recipients refused | INV-5, INV-6, D-4 | `REFUSALS`, failure tests, property plans |
+| `search_tool` setting, reserved names | D-17, D-18 | settings refusals, tool sets, budget-cap test |
+| Caps 100 agents, 7 days, 500 turns, 1 hour | §8.5 constants | refusals, defaults |
+| `prepare()` returns a `Path` | D-13 | workplace tests |
+| Eight event kinds, four stop reasons | §8.5 | enum sets, event tables, exact event lists, oracle |
+| Recording bug ends as `agent_failed` | INV-14, EC-12 | middleware-abort test |
 
 ## Test Suite Map
 
-- `test_agent_swarm_acceptance.py` covers the §4 snippet as written, a swarm that ends after one turn each, and the goal reaching every call verbatim. Start here for a caller-visible regression.
-- `test_agent_swarm_messaging.py` covers mid-turn delivery, batching, wakes after a reply or `isDone`, mail waiting at turn end, mutual messages, the lost-wake-up race, refused messages, and text fidelity.
-- `test_agent_swarm_lifecycle.py` covers:
-  - the turn budget, the time limit, and failures by provider error, tool exception and middleware abort;
-  - concurrent and repeated runs, and cancellation;
-  - callback containment, the event outbox, and `TOOL_CALLED` events.
-- `test_agent_swarm_workplace.py` covers folder creation and preservation, a folder shared across runs, refused workplaces, path escapes, and goal checks.
-- `test_agent_swarm_contract.py` covers:
-  - exports, enums, the prompt family and the runtime registry and refusal;
-  - the exact tools, schemas and system prompt;
-  - settings validation and defaults, key secrecy, record validation, and the complexity budget.
-- `test_agent_swarm_property.py` covers seeded random schedules over two to four agents, checked against the oracle and against each agent's own transcript.
-- `agent_swarm_fixtures.py` holds the scripted runner, `Gate`/`Signal`, `EventLog`, blocking and raising search tools, builders, transcript readers and the event oracle.
+- `test_agent_swarm_acceptance.py` covers the §4 snippet as written, three members created and started in order with the web-search tool, a swarm that ends after one turn each, and the goal reaching every call verbatim. Start here for a caller-visible regression.
+- `test_agent_swarm_messaging.py` covers mid-turn delivery, batching, wakes after a reply or `isDone`, mail waiting at turn end, mutual messages, the lost-wake-up race, self-messages, the two refusals, and text fidelity.
+- `test_agent_swarm_lifecycle.py` covers the turn budget and `wake_refused`, the time limit and its labels, failures by provider error, tool exception and middleware abort, concurrent and repeated runs, cancellation, callback containment, the event outbox, and `tool_called` events.
+- `test_agent_swarm_stop.py` covers `model_called`, `model_error`, the token budget stop, refused calls after the stop, sends in flight at the stop, and missing usage.
+- `test_agent_swarm_observer.py` covers `history_trimmed`, `tool_result_truncated`, `file_changed` and `command_failed`.
+- `test_agent_swarm_compaction.py` covers the `compact` tool, automatic compaction at the trigger (OpenAI and Anthropic usage), the summary call, failures and blank summaries, and a side call that crosses the budget.
+- `test_agent_swarm_settings.py` covers the lib settings record: import identity, members without prompts, web-search settings, the generous limits, defaults, key secrecy and the layering rule.
+- `test_agent_swarm_workplace.py` covers folder creation and preservation, `workplace_prepared`, a folder shared across runs, refused workplaces, path escapes, and goal checks.
+- `test_agent_swarm_contract.py` covers exports, enums, the prompt family, the runtime registry and refusal, the exact tools, schemas and system prompt, settings validation and key secrecy, record validation for twenty-four kinds, and the complexity budget.
+- `test_agent_swarm_property.py` covers seeded random schedules over two to four agents, self-messages and refusals included, checked against the oracle and against each agent's own transcript.
+- `agent_swarm_fixtures.py` holds the scripted runner (provider-stamped, with multi-call steps), `Gate`/`Signal`, `EventLog`, the recording Tavily fake, a one-shot retry middleware, builders, transcript readers and the event oracle.
 
 Run: `PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q` from the repository root.
 
 ## Testing Strategies Selected
 
-- **Example-based acceptance tests**, one per AC, each driving the real loop through a scripted runner and reading both the event record and what each model was sent. These are two independent views of the same run.
-- **A reusable oracle** (`assert_event_invariants`) applied to every swarm run in the pack. Every scenario test also checks the global invariants, not only its own assertion.
-- **Deterministic interleaving control.** A blocking search tool holds an agent mid-turn. `Gate` makes two calls overlap. `Signal`s are set by the `on_event` callback when a state change happens inside the swarm. One test injects a send during the exact callback that reports an agent going idle (the lost-wake-up window).
-- **Seeded property tests** (`random.Random(seed)`, no `hypothesis` dependency). Random plans of valid and invalid sends, file reads, `isDone` or plain finishes, and zero-delay scheduler yields run over two to four agents. Each run is reconciled against the oracle and against every agent's transcript: every successful `message` result is exactly one `MESSAGE_SENT`, every delivered text appears once in the recipient's history and never in a third party's, and histories are append-only.
-- **Hang guards everywhere.** `run_swarm` bounds every `arun` with `asyncio.wait` and a timeout, cancelling the run on a hang. The §4 snippet's `asyncio.run` is wrapped the same way. Every `Gate`, `Signal` and blocking tool fails after `GUARD_SECONDS` instead of waiting forever. A hang is therefore a failure with a message, never a stuck run.
-- **Contract tests** on the static surface: exports, enum values, prompt leaves and their format fields, record validation tables, and the module budget.
-- **Mutation-guided gap tests.** S4 ran textual mutants of the implementation (`docs/spec/agent-swarm/review.md` R-5). Each surviving mutant got one test that is green on the real code and red under that mutant: undelivered mail of a failed agent (M2), the time limit after a decided end, held open by a callback that never returns (M7), and a huge search result over many calls, with every bound derived from the constants (M21, M22).
-- **One deliberate fault injection** (`test_a_turn_middleware_recording_bug_fails_only_that_agent_naming_the_middleware_abort`). It replaces `AgentSwarmRuntime.record_tool_call` for one agent with a function that raises. EC-15 and EC-16 (c) describe behavior that only a bug in that method can trigger, and the loop defaults have no cap that would end a run early by themselves. It is the only replacement besides the model runner.
+- **Example-based acceptance tests**, one or more per AC, each driving the real loop through a scripted runner and reading both the event record and what each model was sent. These are two independent views of the same run.
+- **A reusable oracle** (`assert_event_invariants`) applied to every swarm run in the pack, extended to all twenty-four kinds, the four endings and the one-outcome-per-message rule.
+- **Deterministic interleaving control.** A blocking Tavily fake holds an agent mid-turn. `Gate` makes two calls overlap. `Signal`s are set by the `on_event` callback when a state change happens inside the swarm.
+- **Exact arithmetic from the constants.** Truncation, trim, trigger and budget cases derive every size from the spec's constants, with the value one below and at the bound, so an off-by-one fails.
+- **Seeded property tests** (`random.Random(seed)`, no `hypothesis` dependency) over two to four agents, reconciled against the oracle and every agent's transcript.
+- **Hang guards everywhere.** `run_swarm` bounds every `arun`; every `Gate`, `Signal` and blocking fake fails after `GUARD_SECONDS`.
+- **Contract tests** on the static surface: exports, enum values, prompt leaves and their sentence counts, record validation tables, and the module budget.
+- **Two deliberate seams besides the model runner.** The r5 fault injection (`AgentSwarmRuntime.record_tool_call` raising) drives AC-24. A one-shot retry middleware appended to the member's runtime middleware drives AC-10, because the member loop has no retry of its own; it only decides to retry and never touches the swarm.
 
 ## Omitted Testing Strategies
 
-- **Live provider calls.** Offline by NFR-7; the runner is the only fake.
-- **`KeyboardInterrupt` or `SystemExit` from a member, and uncontained `Exception`s from the runtime's own code (EC-38).** The propagation is Python 3.11's `TaskGroup` behavior, which the spec does not change. The in-progress flag's `finally` is the same one the cancellation test (EC-19) drives.
-- **An exception in `collect_messages` or `end_turn` (EC-16 a).** It takes the same `VidbyteSdkError` containment branch as the provider error that the AC-7 test drives. Forcing it would need a second fault injection into the feature itself.
-- **Windows bash outliving a cancelled swarm (EC-20), concurrent edits to one file (EC-24), bash outside the workplace (EC-25), two swarms sharing one folder (EC-32).** These are stated limitations with no control to test.
-- **A fork of a member agent asking for the member runtime.** The member agent is internal and built inside `arun`. A fork builds a plain `BaseAgent` with the same runtime type (spec INV-24), which `test_runtime_type_refuses_outside_a_swarm_without_calling_a_model` drives directly.
-- **`runtime.py` and the actor runtime unchanged (INV-25, INV-26), and the catalog loading (INV-28).** The neighbour suites cover these: `tests/test_agent_tool_loop.py`, `tests/test_jev_compute.py`, `tests/multi_agent`, `tests/test_prompts_interface.py`, and the InfiniteMemory pack. S4 checks the diff.
-- **Event volume at the default limits (EC-37).** There is no cap to test (Q-8 default). The property tests produce runs of tens of events.
+- **Live provider calls.** Offline by spec §13; the runner and the Tavily HTTP call are the only fakes.
+- **Brave, Browserbase, Exa and Parallel at run time.** `search_tool_for` is checked for every provider statically; only Tavily runs inside a swarm, because the five tools share one construction path.
+- **`max_iterations` and `tool_loop_limit` early exits (EC-13).** The member agent sets no loop guard, so no test can reach them; AC-24's `middleware_abort` drives the same `agent_exited` branch.
+- **500 agents (EC-29, EC-30) and thirty-day runs (EC-31).** The bounds are checked at construction; a run at that scale adds no branch.
+- **Provider acceptance of consecutive assistant messages (A-1, EC-35).** That is the provider's behaviour, not the swarm's; the test checks the shape the engine produces.
+- **A stale `total_prompt_tokens` (EC-26).** Impossible by construction: every iteration starts with a model call.
 - **`hypothesis`.** It is not a dependency; seeded `random.Random` schedules stand in for it.

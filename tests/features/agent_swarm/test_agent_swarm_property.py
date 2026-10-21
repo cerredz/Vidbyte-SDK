@@ -1,13 +1,13 @@
 """FILE: tests/features/agent_swarm/test_agent_swarm_property.py
 
-PURPOSE: Runs many seeded random swarms and checks, on every one, that the event record and what each agent's model actually received agree with each other and with the spec's invariants: valid and refused sends, tool calls, turn ends of both kinds, random scheduler yields inside model calls and inside an async or sync on_event callback, a tight turn budget, and one agent failing mid-turn.
-ROLE IN CODEBASE: Property layer of tests/features/agent_swarm/ (spec INV-1 to INV-10, INV-13 to INV-15, INV-17, NFR-1; D-4, D-5, D-6; EC-2, EC-3, EC-4, EC-7, EC-8, EC-9). The narrow modules pin each rule with a hand-built schedule; this module searches the schedules nobody wrote by hand.
+PURPOSE: Runs many seeded random swarms and checks, on every one, that the event record and what each agent's model actually received agree with each other and with the spec's invariants: valid sends to peers and to oneself, refused sends, sends to a failed peer, tool calls, turn ends of both kinds, random scheduler yields inside model calls and inside an async or sync on_event callback, a tight turn budget, and one agent failing mid-turn.
+ROLE IN CODEBASE: Property layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md AC-7; INV-4 to INV-10, INV-12, INV-14, INV-16, INV-17, INV-20, INV-21; D-4; EC-2, EC-3, EC-5). The narrow modules pin each rule with a hand-built schedule; this module searches the schedules nobody wrote by hand.
 ARCHITECTURE NOTE: Each agent is a RandomAgent behaviour with its own random.Random seeded by "<seed>-<name>", so the k-th decision of an agent depends only on the seed and k, never on how the agents interleave; whatever interleaving asyncio produces, every assertion below must hold. The oracle (assert_event_invariants) checks the events alone; the reconciliation helpers then check the events against the transcripts the scripted runner recorded.
 FUNCTION INVENTORY: RandomAgent (seeded model behaviour); _plan (agents, budgets and callback mode for a seed); _run (one seeded swarm); _assert_transcripts_match_events (reconciliation); test_random_schedules_keep_every_event_invariant_and_end_quiet; test_random_schedules_under_a_tight_turn_budget_end_quiet_or_max_turns_by_the_rules; test_random_schedules_with_one_failing_agent_contain_the_failure.
 COMMON MODIFICATION PATTERNS: To widen the search, add seeds; to add an action, add one branch to RandomAgent.__call__ and, when it can change an event, one check to _assert_transcripts_match_events.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not make a RandomAgent decision depend on what its call contains (delivered text, peers' progress): decisions must be a function of the seed and the call count only, or a failure cannot be replayed from its seed. 3. Do not call bash here; a subprocess makes the interleaving depend on the machine.
-KNOWN EDGE CASES: A send accepted for an agent just before it fails stays undelivered and is legal; a send after AGENT_FAILED is refused with the stopped-recipient text. The failing agent is forced to keep calling tools until its failing call, so the failure always happens inside its first turn.
-RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm/spec.md sections 6.1, 8.5 and 9.1.
+KNOWN EDGE CASES: A send accepted for an agent just before it fails is marked undelivered with its agent_failed; a send after agent_failed is a success with the stopped-recipient text, recorded sent then undelivered (INV-6). A note to oneself is a valid send (D-4) and carries a unique text, so its one delivery can be counted. The failing agent is forced to keep calling tools until its failing call, so the failure always happens inside its first turn.
+RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm-v2/spec.md sections 6.1, 6.2 (AC-7), 8.5 and 9.1.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm/test_agent_swarm_property.py -q
 """
 
@@ -24,6 +24,7 @@ from tests.features.agent_swarm.agent_swarm_fixtures import (
     DELIVERED,
     FAILED,
     IDLE,
+    REFUSED,
     SENT,
     TOOL_CALLED,
     EventLog,
@@ -60,7 +61,7 @@ MAX_VALID_SENDS = 3
 
 
 class RandomAgent:
-    """A seeded model: each call it ends its turn (plain reply or isDone) or calls one tool (a valid send, a refused send, a failing read, or a write)."""
+    """A seeded model: each call it ends its turn (plain reply or isDone) or calls one tool (a valid send, a note to itself, a refused send, a failing read, or a write)."""
 
     def __init__(self, seed: int, name: str, peers: tuple[str, ...], *, fail_at: int | None = None) -> None:
         self.random = random.Random(f"{seed}-{name}")
@@ -94,7 +95,8 @@ class RandomAgent:
             peer = self.random.choice(self.peers)
             return send(peer, f"[{self.name}->{peer} #{self.sends}]")
         if roll < 0.65:
-            to, text = self.random.choice(((self.name, "note to self"), ("nobody", "hello?"), (self.random.choice(self.peers), "   ")))
+            # A note to oneself is accepted (D-4), so its text is unique per call; the other two are the two refusals (INV-5).
+            to, text = self.random.choice(((self.name, f"[{self.name}->{self.name} note #{self.calls}]"), ("nobody", "hello?"), (self.random.choice(self.peers), "   ")))
             return send(to, text)
         if roll < 0.8:
             return tool_call("read_lines", {"path": f"missing-{self.name}.txt"})
@@ -145,7 +147,7 @@ async def _run(tmp_path: Path, seed: int, *, max_turns: int | None, with_failure
 
 
 def _assert_transcripts_match_events(result: Any, scripted: ScriptedSwarm, agents: dict[str, RandomAgent], *, failed: str | None) -> None:
-    """Reconciles result.events with what every model call carried (INV-1 to INV-8, INV-17, AC-19)."""
+    """Reconciles result.events with what every model call carried (INV-1, INV-4 to INV-8, INV-38)."""
     events = list(result.events)
     names = tuple(agents)
     last = {name: scripted.last_call(name) for name in names}
@@ -153,28 +155,31 @@ def _assert_transcripts_match_events(result: Any, scripted: ScriptedSwarm, agent
     sent_ok = prompt_text("message_sent")
     for name in names:
         calls = scripted.calls_by(name)
-        # INV-1, INV-2, INV-3: the goal is every call's prompt; one system string; one conversation that only grows.
+        # INV-1, INV-4: the goal is every call's prompt; one system string; one conversation that only grows.
         assert all(call.prompt == GOAL for call in calls), name
         assert len({call.system for call in calls}) == 1, f"{name}'s system string changed"
         assert calls[0].messages == []
         for earlier, later in zip(calls, calls[1:]):
             assert later.messages[: len(earlier.messages)] == earlier.messages, f"{name}'s history was edited"
-        # AC-19: one TOOL_CALLED per non-isDone tool result, in order, carrying its status.
+        # r5 AC-19 kept: one tool_called per non-isDone tool result, in order, carrying its status.
         transcript_tools = [(tool, "error" if is_error(content) else "success") for tool, content in tool_results(last[name]) if tool != "isDone"]
         recorded_tools = [(event.tool_name, event.tool_status.value) for event in of_kind(events, TOOL_CALLED, name)]
         assert recorded_tools == transcript_tools, name
-        # INV-4, INV-8: every accepted send is one MESSAGE_SENT with the same recipient and text, in order; every refusal sent nothing.
+        # INV-5, INV-6: every accepted send, to a failed peer too, is one message_sent with the same recipient and text, in order; every refusal is one message_refused and sent nothing.
         calls_made = message_tool_calls(last[name])
         accepted = [(args["to"], args["text"]) for args, content in calls_made if not is_error(content)]
         assert [(event.peer, event.text) for event in of_kind(events, SENT, name)] == accepted, name
+        refused = [str(args["to"]) for args, content in calls_made if is_error(content)]
+        assert [event.peer for event in of_kind(events, REFUSED, name)] == refused, name
         for args, content in calls_made:
             if not is_error(content):
-                assert template_regex(sent_ok, recipient=args["to"]).search(content), content
-            elif args["to"] in agents and args["to"] != name and args["text"].strip():
-                # A well-formed send to a peer is refused only because that peer has failed (EC-7).
-                assert args["to"] == failed, f"{name}'s send to {args['to']} was refused: {content}"
-                assert template_regex(stopped, recipient=failed).search(content), content
-        # INV-14: one AGENT_IDLE per turn the model ended.
+                # A send to a failed peer is a success that says it stopped (INV-6); every other accepted send gets the sent text.
+                to_stopped = args["to"] == failed and template_regex(stopped, recipient=failed).search(content)
+                assert to_stopped or template_regex(sent_ok, recipient=args["to"]).search(content), content
+            else:
+                # Only an unknown name or blank text is ever refused (INV-5); a member's name with text never is, the sender's own included.
+                assert args["to"] not in agents or not args["text"].strip(), f"{name}'s send to {args['to']} was refused: {content}"
+        # INV-39: one agent_idle per turn the model ended.
         assert len(of_kind(events, IDLE, name)) == agents[name].turn_ends, name
     delivered_ids = [event.message_id for event in of_kind(events, DELIVERED)]
     for recipient in names:
@@ -182,13 +187,13 @@ def _assert_transcripts_match_events(result: Any, scripted: ScriptedSwarm, agent
         positions: list[int] = []
         for event in of_kind(events, DELIVERED, recipient):
             sent = next(item for item in events if item.sequence == event.message_id)
-            # INV-5, INV-6: a delivered text reaches its recipient once, labeled with its sender, after everything delivered before it.
+            # INV-7, INV-8: a delivered text reaches its recipient once, labeled with its sender, after everything delivered before it.
             assert inbox.count(sent.text) == 1, (recipient, sent.text)
             assert renderings(prompt_text("inbox_message"), inbox, sender=sent.agent, text=sent.text) == 1, (recipient, sent.text)
             positions.append(inbox.index(sent.text))
         assert positions == sorted(positions), f"{recipient} received messages out of acceptance order"
     for event in of_kind(events, SENT):
-        # INV-5: no text reaches an agent it was not sent to, and an undelivered text reaches nobody.
+        # INV-7: no text reaches an agent it was not sent to, and an undelivered text reaches nobody.
         for other in names:
             if other in (event.agent, event.peer):
                 continue
@@ -200,15 +205,16 @@ def _assert_transcripts_match_events(result: Any, scripted: ScriptedSwarm, agent
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seed", range(16))
 async def test_random_schedules_keep_every_event_invariant_and_end_quiet(tmp_path: Path, seed: int) -> None:
-    """INV-1 to INV-15, NFR-1: with the default budget every seeded swarm ends QUIET, its events pass the oracle, and the events and transcripts agree."""
+    """AC-7, INV-4 to INV-17: with the default budget every seeded swarm ends QUIET, its events pass the oracle, and the events and transcripts agree."""
     from vidbyte import AgentSwarmStopReason
+    from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_DEFAULT_MAX_TURNS
 
     result, scripted, agents, log, plan = await _run(tmp_path, seed, max_turns=None, with_failure=False)
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET, plan
-    assert_event_invariants(result, plan.names, max_turns=500, log=log)
+    assert_event_invariants(result, plan.names, max_turns=AGENT_SWARM_DEFAULT_MAX_TURNS, log=log)
     _assert_transcripts_match_events(result, scripted, agents, failed=None)
-    # INV-5: on QUIET every accepted message was delivered.
+    # INV-12: on QUIET every accepted message was delivered.
     assert len(of_kind(result.events, DELIVERED)) == len(of_kind(result.events, SENT))
     scripted.assert_complete()
     assert_no_stray_tasks()
@@ -217,7 +223,7 @@ async def test_random_schedules_keep_every_event_invariant_and_end_quiet(tmp_pat
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seed", range(16, 28))
 async def test_random_schedules_under_a_tight_turn_budget_end_quiet_or_max_turns_by_the_rules(tmp_path: Path, seed: int) -> None:
-    """INV-9, INV-10, EC-8, EC-9: with max_turns between the agent count and two more, turns never exceed it and the stop reason follows the rule the oracle replays."""
+    """INV-9, INV-10, EC-3, EC-5: with max_turns between the agent count and two more, turns never exceed it and the stop reason follows the rule the oracle replays."""
     from vidbyte import AgentSwarmStopReason
 
     plan = _plan(seed)
@@ -234,13 +240,14 @@ async def test_random_schedules_under_a_tight_turn_budget_end_quiet_or_max_turns
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seed", range(28, 36))
 async def test_random_schedules_with_one_failing_agent_contain_the_failure(tmp_path: Path, seed: int) -> None:
-    """INV-17, EC-7, EC-12: one agent's provider error inside its first turn fails only that agent, names the cause, and refuses later sends to it; the others end QUIET."""
+    """INV-6, INV-14 (r5 EC-7 kept; later sends to the failed agent reversed from refusals to stopped-recipient successes): one agent's provider error inside its first turn fails only that agent and names the cause; later sends to it are recorded sent then undelivered; the others end QUIET."""
     from vidbyte import AgentSwarmStopReason
+    from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_DEFAULT_MAX_TURNS
 
     result, scripted, agents, log, plan = await _run(tmp_path, seed, max_turns=None, with_failure=True)
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET, plan
-    assert_event_invariants(result, plan.names, max_turns=500, log=log)
+    assert_event_invariants(result, plan.names, max_turns=AGENT_SWARM_DEFAULT_MAX_TURNS, log=log)
     failures = of_kind(result.events, FAILED)
     assert [event.agent for event in failures] == [plan.failing]
     assert failures[0].text.startswith("ProviderRequestError") and f"503 for {plan.failing}" in failures[0].text

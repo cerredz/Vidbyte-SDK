@@ -1,20 +1,19 @@
 """FILE: tests/features/agent_swarm/test_agent_swarm_lifecycle.py
 
-PURPOSE: Pins how a swarm ends and what survives a failure. A spent turn budget stops wakes and ends MAX_TURNS. The time limit cancels every agent and returns TIMEOUT, even through a slow callback, but never overwrites an end already decided. A provider error fails only its agent and names the cause. Every agent failing ends FAILED, a failure of the last working agent ends the swarm without a hang, and mail left for a failed agent never turns QUIET into MAX_TURNS. An unrequested CancelledError, from a tool or from on_event while the agent works or is idle, fails only that agent instead of making the swarm wait out its time limit. A tool exception, or a model-made tool name with a newline, is only a tool error. A turn-middleware bug fails only its agent through the fail-closed abort. Concurrent and repeated runs are refused or start fresh, and cancellation propagates. A raising on_event never stops the swarm. The event outbox delivers once, in order, and never twice at once. Event time counts from arun. TOOL_CALLED carries name and status and skips isDone.
-ROLE IN CODEBASE: Lifecycle layer of tests/features/agent_swarm/ (spec AC-5, AC-6, AC-7, AC-8, AC-10, AC-15, AC-19; EC-7, EC-8, EC-12, EC-13, EC-14, EC-15, EC-16, EC-17, EC-18, EC-19, EC-21, EC-23, EC-30, EC-39; INV-9..INV-17, INV-19; D-6, D-7, D-8, D-16; NFR-9; S4 review R-3, R-5, R-8, R-11, R-14). Exercises AgentSwarm.arun, AgentSwarmRuntime.arun and its member containment, end check and timeout, and AgentSwarmEvents.
-ARCHITECTURE NOTE: Only the model runner is scripted, with one deliberate exception documented in FEATURE.md: the middleware-abort test replaces AgentSwarmRuntime.record_tool_call for one agent with a function that raises, because EC-15 and EC-16 (c) describe what a bug there must do and nothing else can make a member's run return early. Every swarm run is checked by assert_event_invariants, except the EC-18, EC-39 idle-variant and cancel-after-the-decided-end runs, which spec r4 lets leave the oracle's rules (partial replies; an idle agent failing) and which check their events directly.
-FUNCTION INVENTORY: test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_message_undelivered (AC-5, EC-8); test_the_time_limit_cancels_every_agent_and_returns_timeout (AC-6, EC-17, INV-12, NFR-9); test_the_time_limit_cuts_a_slow_callback_once_and_still_delivers_swarm_ended (EC-23); test_the_time_limit_firing_after_the_end_was_decided_keeps_the_decided_stop_reason (EC-18, INV-10, INV-11; mutant M7); test_a_provider_error_fails_only_that_agent_names_its_cause_and_stops_its_mail (AC-7, EC-7, EC-12); test_every_agent_failing_ends_failed_with_no_replies (AC-8, EC-14); test_the_last_working_agent_failing_ends_the_swarm_without_a_hang (EC-13); test_mail_left_for_an_agent_that_failed_does_not_turn_quiet_into_max_turns (INV-10, EC-12; mutant M2); test_an_exception_inside_a_tool_is_a_tool_error_not_a_failure (EC-16 b); test_a_turn_middleware_recording_bug_fails_only_that_agent_naming_the_middleware_abort (EC-15, EC-16 c); _assert_unrequested_cancel_failed_only (EC-39 checks); test_a_cancelled_error_raised_by_a_tool_fails_that_agent_instead_of_waiting_for_the_time_limit (EC-39); test_a_cancelled_error_raised_by_on_event_while_an_agent_works_fails_that_agent (EC-39); test_a_cancelled_error_raised_by_on_event_on_an_idle_agent_fails_it_instead_of_waking_it (EC-39 idle variant); test_an_unrequested_cancel_after_the_end_was_decided_does_not_fail_the_released_agent (EC-39, INV-17: the no-decided-stop-reason guard; S5 mutant S5-M2); test_a_second_concurrent_arun_is_refused_and_a_later_arun_starts_fresh (AC-15, EC-30, INV-19); test_a_swarm_runtime_runs_only_once (INV-19); test_cancelling_arun_propagates_and_the_swarm_can_run_again (EC-19); test_a_raising_on_event_callback_never_stops_the_swarm (AC-10, EC-21, INV-15, INV-16); test_the_event_outbox_delivers_each_event_once_in_order_even_with_concurrent_flushes (D-6, INV-13, INV-15); test_a_flush_cancelled_mid_callback_never_repeats_that_event (EC-23, D-6); test_event_time_counts_from_arun_not_from_building_the_runtime (D-16, R-11); test_tool_called_events_carry_name_and_status_and_skip_isdone (AC-19); test_a_tool_name_holding_a_newline_is_a_tool_error_not_a_failure (EC-16 b, section 9.1, R-8).
-COMMON MODIFICATION PATTERNS: A new stop condition gets one test that drives it and asserts the stop reason, the replies, and assert_event_invariants.
-WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not assert exact wall-clock durations; the time-limit test only bounds the overrun loosely, and the stop reason proves the limit fired. 3. Do not add a second fault injection; drive failures through the model runner or a developer tool.
-KNOWN EDGE CASES: Under the time limit the cut model call is the after(...) wait, which is cancelled, so it never records a guard problem. The concurrent-run test keeps one ScriptedSwarm across runs; the agents' scripts continue, so the third run's calls are each agent's next step, and their empty history proves a fresh conversation. The clock test holds the pack's one timed wait (0.3 s between building the runtime and arun), because where the clock starts is what it tests. The EC-39 tests give the swarm a two-second limit, so before the rule exists they fail on TIMEOUT in about two seconds each.
-RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm/spec.md sections 6.1, 6.2, 6.3, 8.1 (D-6, D-7, D-8) and 8.5.
+PURPOSE: Pins how a swarm ends and what each agent's ending looks like. A spent turn budget refuses wakes with wake_refused, at send time or at a turn end, and ends MAX_TURNS with each such message undelivered once. The time limit cancels every agent with agent_cancelled naming whether it was working or idle, even through a slow callback or during the start flush, and never overwrites an end already decided. A provider error fails only its agent, names the cause and records its model_error; a later message to it is a success that says it stopped and is recorded sent then undelivered. Every agent failing ends FAILED, a failure of the last working agent ends the swarm without a hang, and mail left for a failed agent is marked undelivered with its failure. An unrequested CancelledError fails only that agent. A tool exception, or a model-made tool name with a newline, is only a tool error. A turn-middleware bug exits only its agent with agent_exited naming middleware_abort. Concurrent and repeated runs are refused or start fresh, and cancellation propagates. A raising on_event never stops the swarm. The event outbox delivers once, in order, and never twice at once. Event time counts from arun. TOOL_CALLED carries name and status and skips isDone.
+ROLE IN CODEBASE: Lifecycle layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md AC-5, AC-6, AC-7, AC-23, AC-24; EC-5, EC-10, EC-11, EC-14; INV-6, INV-9, INV-10, INV-12, INV-13, INV-14, INV-16, INV-17, INV-20, INV-23, INV-28, INV-40). Exercises AgentSwarm.arun, AgentSwarmRuntime.arun with its member containment, end check, stop block and timeout, and AgentSwarmEvents.
+ARCHITECTURE NOTE: Only the model runner and the Tavily HTTP call are scripted, with one deliberate exception documented in FEATURE.md: the middleware-abort test replaces AgentSwarmRuntime.record_tool_call for one agent with a function that raises, because AC-24 names that fault and nothing else makes a member's run return early. Every swarm run is checked by assert_event_invariants; the time-limit-after-the-decided-end run is checked without its callback log, which the stuck callback cuts.
+FUNCTION INVENTORY: test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_message_undelivered (AC-6, EC-5); test_a_turn_end_with_mail_and_no_turn_left_refuses_the_wake_once_and_ends_max_turns (INV-10); test_the_time_limit_cancels_every_agent_and_returns_timeout (INV-12, INV-14); test_the_time_limit_labels_working_and_idle_agents_cancelled_and_fails_none (AC-23); test_the_time_limit_during_the_start_flush_cancels_every_member_as_working (EC-10); test_the_time_limit_cuts_a_slow_callback_once_and_still_delivers_swarm_ended (INV-20); test_the_time_limit_firing_after_the_end_was_decided_keeps_the_decided_stop_reason (INV-12, INV-14); test_a_provider_error_fails_only_that_agent_names_its_cause_and_stops_its_mail (AC-5, INV-6, INV-23); test_every_agent_failing_ends_failed_with_no_replies (EC-14); test_the_last_working_agent_failing_ends_the_swarm_without_a_hang; test_mail_left_for_an_agent_that_failed_is_marked_undelivered_with_its_failure (INV-14); test_an_exception_inside_a_tool_is_a_tool_error_not_a_failure; test_a_turn_middleware_recording_bug_exits_only_that_agent_naming_the_middleware_abort (AC-24); _assert_unrequested_cancel_failed_only; three stray-CancelledError tests (EC-11); test_an_unrequested_cancel_after_the_end_was_decided_does_not_fail_the_agent; concurrency, re-run and cancellation tests (INV-40); callback and outbox tests (INV-20); test_event_time_counts_from_arun_not_from_building_the_runtime (INV-28); test_tool_called_events_carry_name_and_status_and_skip_isdone; test_a_tool_name_holding_a_newline_is_a_tool_error_not_a_failure.
+COMMON MODIFICATION PATTERNS: A new stop condition gets one test that drives it and asserts the stop reason, the swarm_stopping block, each agent's terminal event, the replies, and assert_event_invariants.
+WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not assert exact wall-clock durations; the time-limit tests only bound the overrun loosely, and the stop reason proves the limit fired. 3. Do not add a second fault injection; drive failures through the model runner, FakeTavily or a callback.
+KNOWN EDGE CASES: Under the time limit the order in which the task group cancels member tasks is not a contract, so the agent_cancelled events recorded by the members' own cancel branches are compared as a set; the ones _stop(timeout) records for members whose task never ran are in member order (EC-10). An agent cut inside its own turn-end flush may be labeled working or idle, so only agents that were plainly parked or plainly inside a model call have their agent_state pinned. The concurrent-run test keeps one ScriptedSwarm across runs; the third run's calls are each agent's next step, and their empty history proves a fresh conversation. The clock test holds the pack's one timed wait (0.3 s between building the runtime and arun), because where the clock starts is what it tests. The stray-cancel tests give the swarm a two-second limit, so before the rule exists they fail on TIMEOUT in about two seconds each.
+RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm-v2/spec.md sections 6.1, 6.2, 6.3 and 8.5.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm/test_agent_swarm_lifecycle.py -q
 """
 
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -22,18 +21,29 @@ from typing import Any
 import pytest
 
 from tests.features.agent_swarm.agent_swarm_fixtures import (
+    CANCELLED,
     DELIVERED,
     ENDED,
+    EXITED,
     FAILED,
     IDLE,
+    MODEL_CALLED,
+    MODEL_ERROR,
+    PREPARED,
+    RELEASED,
     RUN_GUARD_SECONDS,
     SENT,
     STARTED,
+    STOPPING,
+    TAVILY_TOOL,
+    TERMINAL_KINDS,
     TOOL_CALLED,
+    UNDELIVERED,
+    WAKE_REFUSED,
     WOKE,
     EventLog,
+    FakeTavily,
     ScriptedSwarm,
-    SearchTool,
     Signal,
     after,
     assert_event_invariants,
@@ -41,21 +51,26 @@ from tests.features.agent_swarm.agent_swarm_fixtures import (
     build_settings,
     build_swarm,
     describe,
+    error_line,
     fail,
     finish,
     is_error,
-    of_kind,
     observe,
+    of_kind,
     only,
+    pairs,
     prompt_text,
     provider_error,
     reply,
     run_swarm,
+    search,
     send,
     seq_of,
+    start_pairs,
     template_regex,
     tool_call,
     tool_result,
+    web_search_fields,
     workplace_path,
     yield_to_loop,
 )
@@ -67,9 +82,26 @@ CAUSE = "openai returned 503: upstream overloaded"
 GOAL_AGAIN = "Run the same swarm runtime a second time."
 
 
+def _terminals(events: Any) -> dict[str, list[str]]:
+    # Each agent's terminal events, in record order (INV-14: exactly one each).
+    found: dict[str, list[str]] = {}
+    for event in events:
+        if event.kind.value in TERMINAL_KINDS:
+            found.setdefault(event.agent, []).append(event.kind.value)
+    return found
+
+
+def _assert_sent_then_undelivered(events: Any, sender: str, recipient: str) -> Any:
+    # INV-6, AC-5: the send to a stopped recipient is recorded, and its undelivered mark is the very next event with the same id.
+    sent = only(events, SENT, sender)
+    follower = events[sent.sequence]
+    assert sent.peer == recipient and (follower.kind.value, follower.agent, follower.peer, follower.message_id) == (UNDELIVERED, recipient, sender, sent.message_id), describe(events)
+    return sent
+
+
 @pytest.mark.asyncio
 async def test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_message_undelivered(tmp_path: Path) -> None:
-    """AC-5, EC-8, INV-9, INV-10: with max_turns equal to the agent count, a message to an idle tester is accepted but wakes nobody, and the swarm ends MAX_TURNS."""
+    """AC-6, EC-5, INV-9, INV-12 (r5 AC-5 kept, wake_refused and message_undelivered added): with max_turns equal to the agent count, a message to an idle tester is accepted, records message_sent then wake_refused, wakes nobody, and gets exactly one message_undelivered when the swarm ends MAX_TURNS."""
     from vidbyte import AgentSwarmStopReason
 
     log = EventLog()
@@ -83,7 +115,12 @@ async def test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_messa
     # The send itself succeeded (queued); only the wake was refused.
     accepted = tool_result(scripted.calls_by("builder")[1], "message")
     assert not is_error(accepted) and template_regex(prompt_text("message_sent"), recipient="tester").search(accepted)
-    assert only(result.events, SENT, "builder").peer == "tester"
+    sent = only(result.events, SENT, "builder")
+    refused = only(result.events, WAKE_REFUSED, "tester")
+    assert sent.peer == "tester" and (refused.sequence, refused.peer, refused.message_id) == (sent.sequence + 1, "builder", sent.message_id)
+    undelivered = only(result.events, UNDELIVERED, "tester")
+    assert (undelivered.peer, undelivered.message_id) == ("builder", sent.message_id)
+    assert undelivered.sequence > only(result.events, STOPPING).sequence
     assert of_kind(result.events, WOKE) == [] and of_kind(result.events, DELIVERED) == []
     assert len(scripted.calls_by("tester")) == 1
     # Both agents were released normally and return their last turn's reply.
@@ -93,9 +130,33 @@ async def test_a_spent_turn_budget_stops_wakes_and_ends_max_turns_with_the_messa
 
 
 @pytest.mark.asyncio
-async def test_the_time_limit_cancels_every_agent_and_returns_timeout(tmp_path: Path) -> None:
-    """AC-6, EC-17, INV-12, NFR-9: a model call that never answers is cut by timeout_seconds; arun returns TIMEOUT, ends with SWARM_ENDED, and leaves no task behind."""
+async def test_a_turn_end_with_mail_and_no_turn_left_refuses_the_wake_once_and_ends_max_turns(tmp_path: Path) -> None:
+    """INV-10, EC-5: a message that waits for a working tester whose budget is spent gets one wake_refused when tester ends its turn, right after its agent_idle, and one message_undelivered at the stop; nobody wakes."""
     from vidbyte import AgentSwarmStopReason
+
+    log = EventLog()
+    builder_sent = log.signal(SENT, "builder")
+    scripted = ScriptedSwarm({"builder": [send("tester", NOTE), reply("Builder done.")], "tester": [after(builder_sent, reply("Tester done."))]})
+    swarm = build_swarm(tmp_path, NAMES, max_turns=2, on_event=log.callback)
+    with scripted.install():
+        result = await run_swarm(swarm)
+
+    assert result.stop_reason is AgentSwarmStopReason.MAX_TURNS, describe(result.events)
+    sent = only(result.events, SENT, "builder")
+    refused = only(result.events, WAKE_REFUSED, "tester")
+    assert (refused.sequence, refused.peer, refused.message_id) == (seq_of(result.events, IDLE, "tester") + 1, "builder", sent.message_id)
+    assert only(result.events, UNDELIVERED, "tester").message_id == sent.message_id
+    assert of_kind(result.events, WOKE) == [] and of_kind(result.events, DELIVERED) == []
+    assert len(scripted.calls_by("tester")) == 1
+    assert_event_invariants(result, NAMES, max_turns=2, log=log)
+    scripted.assert_complete()
+
+
+@pytest.mark.asyncio
+async def test_the_time_limit_cancels_every_agent_and_returns_timeout(tmp_path: Path) -> None:
+    """INV-12, INV-14 (r5 AC-6 kept, its event list rewritten for v2): a model call that never answers is cut by timeout_seconds; builder is cancelled while working and tester while idle, swarm_stopping carries TIMEOUT, arun returns TIMEOUT, and no task is left behind."""
+    from vidbyte import AgentSwarmStopReason
+    from vidbyte.lib.enums import AgentSwarmAgentState
 
     never = Signal("a model answer that never comes")
     log = EventLog()
@@ -108,19 +169,78 @@ async def test_the_time_limit_cancels_every_agent_and_returns_timeout(tmp_path: 
     elapsed = time.monotonic() - started
 
     assert result.stop_reason is AgentSwarmStopReason.TIMEOUT
-    assert [(event.kind.value, event.agent) for event in result.events] == [(STARTED, "builder"), (STARTED, "tester"), (IDLE, "tester"), (ENDED, "")]
-    assert result.events[-1].stop_reason is AgentSwarmStopReason.TIMEOUT
+    events = result.events
+    assert pairs(events[:7]) == [*start_pairs(NAMES), (MODEL_CALLED, "tester"), (IDLE, "tester")], describe(events)
+    assert sorted(pairs(events[7:9])) == [(CANCELLED, "builder"), (CANCELLED, "tester")], describe(events)
+    assert pairs(events[9:]) == [(STOPPING, ""), (ENDED, "")], describe(events)
+    assert {event.agent: event.agent_state for event in of_kind(events, CANCELLED)} == {"builder": AgentSwarmAgentState.WORKING, "tester": AgentSwarmAgentState.IDLE}
+    assert events[-2].stop_reason is AgentSwarmStopReason.TIMEOUT and events[-1].stop_reason is AgentSwarmStopReason.TIMEOUT
     assert result.replies == ()
     # The limit is real: the stuck call was cancelled long before its own 20-second guard could fire.
     assert elapsed < timeout + 10.0, f"arun took {elapsed:.1f} s for a {timeout} s limit"
     assert_no_stray_tasks()
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
+async def test_the_time_limit_labels_working_and_idle_agents_cancelled_and_fails_none(tmp_path: Path) -> None:
+    """AC-23, INV-12, INV-14: the limit expires while builder and reviewer are inside model calls and tester is idle; each working agent gets agent_cancelled working, tester gets agent_cancelled idle, swarm_stopping carries timeout, no agent_failed exists, and swarm_ended is last."""
+    from vidbyte import AgentSwarmStopReason
+    from vidbyte.lib.enums import AgentSwarmAgentState
+
+    never = Signal("a model answer that never comes")
+    log = EventLog()
+    scripted = ScriptedSwarm({"builder": [after(never, reply("Never sent."))], "tester": [reply("Tester done.")], "reviewer": [after(never, reply("Never sent."))]})
+    swarm = build_swarm(tmp_path, THREE, timeout_seconds=0.5, on_event=log.callback)
+    with scripted.install():
+        result = await run_swarm(swarm)
+
+    assert result.stop_reason is AgentSwarmStopReason.TIMEOUT
+    events = result.events
+    states = {event.agent: event.agent_state for event in of_kind(events, CANCELLED)}
+    assert states == {"builder": AgentSwarmAgentState.WORKING, "tester": AgentSwarmAgentState.IDLE, "reviewer": AgentSwarmAgentState.WORKING}, describe(events)
+    assert of_kind(events, FAILED) == [] and of_kind(events, RELEASED) == []
+    assert max(event.sequence for event in of_kind(events, CANCELLED)) < only(events, STOPPING).sequence
+    assert only(events, STOPPING).stop_reason is AgentSwarmStopReason.TIMEOUT
+    assert events[-1].kind.value == ENDED and result.replies == ()
+    assert_no_stray_tasks()
+    assert_event_invariants(result, THREE, max_turns=swarm.settings.max_turns, log=log)
+    scripted.assert_complete()
+
+
+@pytest.mark.asyncio
+async def test_the_time_limit_during_the_start_flush_cancels_every_member_as_working(tmp_path: Path) -> None:
+    """EC-10, INV-12, INV-17, INV-20: the callback for builder's agent_started never returns, so the limit expires inside the start flush before any member task runs; _stop(timeout) records agent_cancelled working for every member in member order, then swarm_stopping, and the final flush delivers every remaining event once."""
+    from vidbyte import AgentSwarmStopReason
+    from vidbyte.lib.enums import AgentSwarmAgentState
+
+    stuck = Signal("a callback that never returns")
+    log = EventLog(mode="async")
+
+    async def hold_on_builder_started(event: Any) -> None:
+        if event.kind.value == STARTED and event.agent == "builder":
+            await stuck.wait("on_event")
+
+    log.hook(hold_on_builder_started)
+    scripted = ScriptedSwarm({"builder": [], "tester": []})
+    swarm = build_swarm(tmp_path, NAMES, timeout_seconds=0.5, on_event=log.callback)
+    with scripted.install():
+        result = await run_swarm(swarm)
+
+    assert result.stop_reason is AgentSwarmStopReason.TIMEOUT
+    assert pairs(result.events) == [*start_pairs(NAMES), (CANCELLED, "builder"), (CANCELLED, "tester"), (STOPPING, ""), (ENDED, "")], describe(result.events)
+    assert [event.agent_state for event in of_kind(result.events, CANCELLED)] == [AgentSwarmAgentState.WORKING, AgentSwarmAgentState.WORKING]
+    assert scripted.calls == []
+    # The cut callback is never called again for its event, and everything after it still arrives once.
+    assert log.received == list(result.events)
+    assert_no_stray_tasks()
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
+
+
+@pytest.mark.asyncio
 async def test_the_time_limit_cuts_a_slow_callback_once_and_still_delivers_swarm_ended(tmp_path: Path) -> None:
-    """EC-23, INV-15: a callback stuck on tester's AGENT_IDLE is cut by the time limit, never called again for it, and SWARM_ENDED still reaches on_event."""
+    """INV-20 (r5 EC-23 kept, its event list rewritten for v2): a callback stuck on tester's agent_idle is cut by the time limit, never called again for it, and the cancellations, swarm_stopping and swarm_ended still reach on_event."""
     from vidbyte import AgentSwarmStopReason
 
     stuck, never = Signal("a callback that never returns"), Signal("a model answer that never comes")
@@ -137,15 +257,17 @@ async def test_the_time_limit_cuts_a_slow_callback_once_and_still_delivers_swarm
         result = await run_swarm(swarm)
 
     assert result.stop_reason is AgentSwarmStopReason.TIMEOUT
-    assert [(event.kind.value, event.agent) for event in log.received] == [(STARTED, "builder"), (STARTED, "tester"), (IDLE, "tester"), (ENDED, "")]
+    seen = pairs(log.received)
+    assert seen[:7] == [*start_pairs(NAMES), (MODEL_CALLED, "tester"), (IDLE, "tester")], describe(log.received)
+    assert sorted(seen[7:9]) == [(CANCELLED, "builder"), (CANCELLED, "tester")] and seen[9:] == [(STOPPING, ""), (ENDED, "")], describe(log.received)
     assert log.received[-1] == result.events[-1]
     assert_no_stray_tasks()
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
 
 
 @pytest.mark.asyncio
 async def test_the_time_limit_firing_after_the_end_was_decided_keeps_the_decided_stop_reason(tmp_path: Path) -> None:
-    """EC-18, INV-10, INV-11 (r4, S4 R-14): the swarm decides QUIET when tester ends its turn, but the callback for tester's AGENT_IDLE never returns, so the time limit fires while tester is still unwinding; the stop reason stays QUIET and tester's last text survives in its AGENT_IDLE event, though replies may be partial."""
+    """INV-12, INV-14 (r5 EC-18 kept, its event list rewritten for v2): the swarm decides QUIET when tester ends its turn, but the callback for tester's agent_idle never returns, so the time limit fires while tester is unwinding; the stop reason stays QUIET, one swarm_stopping carries it, every agent still has exactly one terminal event and none failed, and replies hold only released agents' last turns."""
     from vidbyte import AgentSwarmStopReason
 
     stuck = Signal("a callback that never returns")
@@ -158,32 +280,37 @@ async def test_the_time_limit_firing_after_the_end_was_decided_keeps_the_decided
 
     log.hook(hold_on_tester_idle)
     scripted = ScriptedSwarm({"builder": [reply("Builder done.")], "tester": [after(builder_idle, reply("Tester done."))]})
-    # end_turn runs the end check before it flushes (spec section 8.5), so QUIET is decided before the callback holds.
+    # end_turn decides the stop before it flushes (spec section 8.5), so QUIET is decided before the callback holds.
     swarm = build_swarm(tmp_path, NAMES, timeout_seconds=1.0, on_event=log.callback)
     with scripted.install():
         result = await run_swarm(swarm)
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET, describe(result.events)
-    assert [(event.kind.value, event.agent) for event in result.events] == [(STARTED, "builder"), (STARTED, "tester"), (IDLE, "builder"), (IDLE, "tester"), (ENDED, "")]
-    assert result.events[-1].stop_reason is AgentSwarmStopReason.QUIET
-    assert [event.text for event in of_kind(result.events, IDLE)] == ["Builder done.", "Tester done."]
-    # INV-11 r4: replies may miss the agent the time limit cut, but never holds anything but a released agent's last turn.
+    events = result.events
+    stopping = only(events, STOPPING)
+    assert pairs(events[: stopping.sequence]) == [*start_pairs(NAMES), (MODEL_CALLED, "builder"), (IDLE, "builder"), (MODEL_CALLED, "tester"), (IDLE, "tester"), (STOPPING, "")], describe(events)
+    assert stopping.stop_reason is AgentSwarmStopReason.QUIET and events[-1].stop_reason is AgentSwarmStopReason.QUIET
+    terminals = _terminals(events)
+    assert terminals["builder"] == [RELEASED] and len(terminals["tester"]) == 1 and terminals["tester"][0] in (RELEASED, CANCELLED), describe(events)
+    assert [event.text for event in of_kind(events, IDLE)] == ["Builder done.", "Tester done."]
     assert {(item.sender, item.content) for item in result.replies} <= {("builder", "Builder done."), ("tester", "Tester done.")}
     assert_no_stray_tasks()
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_a_provider_error_fails_only_that_agent_names_its_cause_and_stops_its_mail(tmp_path: Path) -> None:
-    """AC-7, EC-7, EC-12, INV-17: reviewer's provider error becomes one AGENT_FAILED naming ProviderRequestError and its text; the others end normally and a later message to reviewer is refused."""
+    """AC-5, INV-6, INV-14, INV-23 (r5 AC-7 kept; the stopped-recipient refusal reversed to a success): reviewer's provider error is one model_error then one agent_failed naming ProviderRequestError and its text; a later message to reviewer is a success with the message_stopped_recipient text, recorded as message_sent then message_undelivered; the others end normally."""
     from vidbyte import AgentSwarmStopReason
     from vidbyte.lib.dataclasses.tools import ToolStatus
 
     log = EventLog()
     reviewer_failed = log.signal(FAILED, "reviewer")
+    error = provider_error(CAUSE)
     scripted = ScriptedSwarm(
         {
-            "reviewer": [fail(provider_error(CAUSE))],
+            "reviewer": [fail(error)],
             "builder": [after(reviewer_failed, send("reviewer", "Please review c2f.py.")), reply("Builder done.")],
             "tester": [reply("Tester done.")],
         }
@@ -197,20 +324,22 @@ async def test_a_provider_error_fails_only_that_agent_names_its_cause_and_stops_
     assert failure.text.startswith("ProviderRequestError")
     assert CAUSE in failure.text
     assert "failed to generate a reply" not in failure.text
-    refusal = tool_result(scripted.calls_by("builder")[1], "message")
-    assert is_error(refusal) and template_regex(prompt_text("message_stopped_recipient"), recipient="reviewer").search(refusal), refusal
-    assert of_kind(result.events, SENT) == []
+    model_error = only(result.events, MODEL_ERROR, "reviewer")
+    assert model_error.text == error_line(error) and model_error.sequence < failure.sequence
+    stopped = tool_result(scripted.calls_by("builder")[1], "message")
+    assert not is_error(stopped) and template_regex(prompt_text("message_stopped_recipient"), recipient="reviewer").search(stopped), stopped
+    _assert_sent_then_undelivered(result.events, "builder", "reviewer")
     tool_event = only(result.events, TOOL_CALLED, "builder")
-    assert (tool_event.tool_name, tool_event.tool_status) == ("message", ToolStatus.ERROR)
+    assert (tool_event.tool_name, tool_event.tool_status) == ("message", ToolStatus.SUCCESS)
     assert result.stop_reason is AgentSwarmStopReason.QUIET
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Builder done."), ("tester", "Tester done.")]
-    assert_event_invariants(result, THREE, max_turns=500, log=log)
+    assert_event_invariants(result, THREE, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_every_agent_failing_ends_failed_with_no_replies(tmp_path: Path) -> None:
-    """AC-8, EC-14: when every model call raises a provider error, the stop reason is FAILED, each agent has one AGENT_FAILED naming its own cause, and replies is empty."""
+    """EC-14, INV-12 (r5 AC-8 kept, its event count rewritten for v2): when every model call raises a provider error, the stop reason is FAILED, each agent has one model_error and one agent_failed naming its own cause, nobody is released, and replies is empty."""
     from vidbyte import AgentSwarmStopReason
 
     log = EventLog()
@@ -223,16 +352,18 @@ async def test_every_agent_failing_ends_failed_with_no_replies(tmp_path: Path) -
     for name in NAMES:
         failure = only(result.events, FAILED, name)
         assert failure.text.startswith("ProviderRequestError") and f"openai returned 503 for {name}" in failure.text
+        assert seq_of(result.events, MODEL_ERROR, name) < failure.sequence
     assert result.replies == ()
-    assert len(result.events) == 5
+    assert sorted(pairs(result.events[5:9])) == sorted([(MODEL_ERROR, "builder"), (MODEL_ERROR, "tester"), (FAILED, "builder"), (FAILED, "tester")])
+    assert pairs(result.events[9:]) == [(STOPPING, ""), (ENDED, "")] and len(result.events) == 11
     assert_no_stray_tasks()
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_the_last_working_agent_failing_ends_the_swarm_without_a_hang(tmp_path: Path) -> None:
-    """EC-13, INV-10: tester fails while builder is already idle; the failure runs the end check, so the swarm ends QUIET with builder's reply only."""
+    """INV-12, INV-14 (r5 EC-13 kept): tester fails while builder is already idle; the failure runs the end check, so the swarm ends QUIET, builder is released with its reply."""
     from vidbyte import AgentSwarmStopReason
 
     log = EventLog()
@@ -243,15 +374,15 @@ async def test_the_last_working_agent_failing_ends_the_swarm_without_a_hang(tmp_
         result = await run_swarm(swarm)
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET
-    assert seq_of(result.events, IDLE, "builder") < seq_of(result.events, FAILED, "tester")
+    assert seq_of(result.events, IDLE, "builder") < seq_of(result.events, FAILED, "tester") < seq_of(result.events, STOPPING) < seq_of(result.events, RELEASED, "builder")
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Builder done.")]
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
-async def test_mail_left_for_an_agent_that_failed_does_not_turn_quiet_into_max_turns(tmp_path: Path) -> None:
-    """INV-10, EC-12: builder's message is queued for reviewer while reviewer's model call is still open; that call then fails, so the message is never delivered, and the swarm ends QUIET because only running agents' undelivered mail counts toward MAX_TURNS."""
+async def test_mail_left_for_an_agent_that_failed_is_marked_undelivered_with_its_failure(tmp_path: Path) -> None:
+    """INV-14, INV-7 (r5 M2 kept: QUIET, never MAX_TURNS): builder's message is queued for reviewer while reviewer's model call is open; that call then fails, so agent_failed is followed in the same block by message_undelivered for that message, and the swarm ends QUIET."""
     from vidbyte import AgentSwarmStopReason
 
     log = EventLog()
@@ -263,42 +394,46 @@ async def test_mail_left_for_an_agent_that_failed_does_not_turn_quiet_into_max_t
         result = await run_swarm(swarm)
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET, describe(result.events)
-    # The send was accepted while reviewer was working, so the message sits in a failed agent's inbox.
+    # The send was accepted while reviewer was working, so the message sat in reviewer's inbox until it failed.
     assert not is_error(tool_result(scripted.calls_by("builder")[1], "message"))
-    assert only(result.events, SENT, "builder").peer == "reviewer"
+    sent = only(result.events, SENT, "builder")
+    failure = only(result.events, FAILED, "reviewer")
+    undelivered = only(result.events, UNDELIVERED, "reviewer")
+    assert failure.text.startswith("ProviderRequestError")
+    assert (undelivered.sequence, undelivered.peer, undelivered.message_id) == (failure.sequence + 1, "builder", sent.message_id)
     assert of_kind(result.events, DELIVERED) == []
-    assert only(result.events, FAILED, "reviewer").text.startswith("ProviderRequestError")
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Builder done.")]
-    assert_event_invariants(result, names, max_turns=500, log=log)
+    assert_event_invariants(result, names, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_an_exception_inside_a_tool_is_a_tool_error_not_a_failure(tmp_path: Path) -> None:
-    """EC-16 (b), INV-17: a developer search tool that raises gives tester a tool error and a TOOL_CALLED with status error; tester keeps working and nobody fails."""
+    """INV-14 (r5 EC-16 b kept; the developer search tool replaced by the Tavily tool, D-3): a Tavily call that raises gives tester a tool error and a tool_called with status error; tester keeps working and nobody fails."""
     from vidbyte import AgentSwarmStopReason
     from vidbyte.lib.dataclasses.tools import ToolStatus
 
-    search = SearchTool(error=RuntimeError("search backend down"))
+    fake = FakeTavily(error=RuntimeError("search backend down"))
     log = EventLog()
-    scripted = ScriptedSwarm({"tester": [tool_call("web_search", {"query": "c2f"}), reply("Tester done.")], "builder": [reply("Builder done.")]})
-    swarm = build_swarm(tmp_path, NAMES, search_tool=search, on_event=log.callback)
-    with scripted.install():
+    scripted = ScriptedSwarm({"tester": [search("c2f"), reply("Tester done.")], "builder": [reply("Builder done.")]})
+    swarm = build_swarm(tmp_path, NAMES, on_event=log.callback, **web_search_fields())
+    with scripted.install(), fake.install():
         result = await run_swarm(swarm)
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET
     assert of_kind(result.events, FAILED) == []
+    assert fake.queries == ["c2f"]
     tool_event = only(result.events, TOOL_CALLED, "tester")
-    assert (tool_event.tool_name, tool_event.tool_status) == ("web_search", ToolStatus.ERROR)
-    assert is_error(tool_result(scripted.calls_by("tester")[1], "web_search"))
+    assert (tool_event.tool_name, tool_event.tool_status) == (TAVILY_TOOL, ToolStatus.ERROR)
+    assert is_error(tool_result(scripted.calls_by("tester")[1], TAVILY_TOOL))
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Builder done."), ("tester", "Tester done.")]
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
-async def test_a_turn_middleware_recording_bug_fails_only_that_agent_naming_the_middleware_abort(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """EC-15, EC-16 (c), INV-17: a bug in record_tool_call aborts tester's run through the fail-closed turn middleware; tester gets one AGENT_FAILED naming that stop reason, and builder ends normally."""
+async def test_a_turn_middleware_recording_bug_exits_only_that_agent_naming_the_middleware_abort(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC-24, INV-14 (reverses r5's agent_failed for this case): a bug in record_tool_call aborts tester's run through the fail-closed turn middleware while the swarm still runs; tester gets one agent_exited with text middleware_abort, the message waiting in its inbox gets message_undelivered in the same block, and builder keeps working and ends normally."""
     from vidbyte import AgentSwarmStopReason
     from vidbyte.agents.agent_swarm import AgentSwarmRuntime
     from vidbyte.lib.dataclasses.tools import ToolStatus
@@ -314,37 +449,41 @@ async def test_a_turn_middleware_recording_bug_fails_only_that_agent_naming_the_
 
     monkeypatch.setattr(AgentSwarmRuntime, "record_tool_call", broken_for_tester)
     log = EventLog()
+    builder_sent = log.signal(SENT, "builder")
+    # tester's tool call is answered only after builder's message is in its inbox, so the abort finds mail waiting.
     scripted = ScriptedSwarm(
         {
-            "tester": [tool_call("read_lines", {"path": "missing.txt"})],
-            "builder": [tool_call("write_text", {"path": "notes.txt", "content": "n"}), reply("Builder done.")],
+            "tester": [after(builder_sent, tool_call("read_lines", {"path": "missing.txt"}))],
+            "builder": [send("tester", NOTE), tool_call("write_text", {"path": "notes.txt", "content": "n"}), reply("Builder done.")],
         }
     )
     swarm = build_swarm(tmp_path, NAMES, on_event=log.callback)
     with scripted.install():
         result = await run_swarm(swarm)
 
-    failure = only(result.events, FAILED, "tester")
-    # The early return names the run's own stop reason, not the bug's type (spec EC-16 (c)).
-    assert re.search(r"middleware.abort", failure.text, re.IGNORECASE), failure.text
-    assert "RuntimeError" not in failure.text
+    exited = only(result.events, EXITED, "tester")
+    assert exited.text == "middleware_abort", exited.text
+    assert of_kind(result.events, FAILED) == []
+    sent = only(result.events, SENT, "builder")
+    undelivered = only(result.events, UNDELIVERED, "tester")
+    assert (undelivered.sequence, undelivered.peer, undelivered.message_id) == (exited.sequence + 1, "builder", sent.message_id)
     assert len(scripted.calls_by("tester")) == 1
     assert of_kind(result.events, TOOL_CALLED, "tester") == []
-    builder_tool = only(result.events, TOOL_CALLED, "builder")
-    assert (builder_tool.tool_name, builder_tool.tool_status) == ("write_text", ToolStatus.SUCCESS)
+    builder_tools = [(event.tool_name, event.tool_status) for event in of_kind(result.events, TOOL_CALLED, "builder")]
+    assert builder_tools == [("message", ToolStatus.SUCCESS), ("write_text", ToolStatus.SUCCESS)]
     assert result.stop_reason is AgentSwarmStopReason.QUIET
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Builder done.")]
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
-# EC-39 runs are given a short time limit: without the rule they wait it out, so a red run stays quick,
+# Stray-cancel runs are given a short time limit: without the rule they wait it out, so a red run stays quick,
 # and with it the swarm ends long before half of it has passed.
 CANCEL_TIMEOUT_SECONDS = 2.0
 
 
 def _assert_unrequested_cancel_failed_only(result: Any, agent: str, elapsed: float) -> None:
-    """EC-39: one AGENT_FAILED naming CancelledError for `agent`, the swarm ended QUIET by INV-10, and arun never waited for the time limit."""
+    """EC-11: one agent_failed naming CancelledError for `agent`, the swarm ended QUIET, and arun never waited for the time limit."""
     from vidbyte import AgentSwarmStopReason
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET, f"{result.stop_reason.value} after {elapsed:.2f} s: {describe(result.events)}"
@@ -355,27 +494,27 @@ def _assert_unrequested_cancel_failed_only(result: Any, agent: str, elapsed: flo
 
 @pytest.mark.asyncio
 async def test_a_cancelled_error_raised_by_a_tool_fails_that_agent_instead_of_waiting_for_the_time_limit(tmp_path: Path) -> None:
-    """EC-39 (r4, S4 R-3), INV-10, INV-17, D-7: a developer search tool that raises asyncio.CancelledError, which the swarm never requested, gives builder one AGENT_FAILED naming CancelledError; tester's turn still ends, and the swarm ends QUIET at once instead of at timeout_seconds."""
-    search = SearchTool(error=asyncio.CancelledError())
+    """EC-11, INV-14 (r5 EC-39 kept; the developer search tool replaced by the Tavily tool): a Tavily call that raises asyncio.CancelledError, which the swarm never requested, gives builder one agent_failed naming CancelledError; tester's turn still ends, and the swarm ends QUIET at once instead of at timeout_seconds."""
+    fake = FakeTavily(error=asyncio.CancelledError())
     log = EventLog()
-    scripted = ScriptedSwarm({"builder": [tool_call("web_search", {"query": "c2f"})], "tester": [reply("Tester done.")]})
-    swarm = build_swarm(tmp_path, NAMES, search_tool=search, timeout_seconds=CANCEL_TIMEOUT_SECONDS, on_event=log.callback)
+    scripted = ScriptedSwarm({"builder": [search("c2f")], "tester": [reply("Tester done.")]})
+    swarm = build_swarm(tmp_path, NAMES, timeout_seconds=CANCEL_TIMEOUT_SECONDS, on_event=log.callback, **web_search_fields())
     started = time.monotonic()
-    with scripted.install():
+    with scripted.install(), fake.install():
         result = await run_swarm(swarm)
     elapsed = time.monotonic() - started
 
     _assert_unrequested_cancel_failed_only(result, "builder", elapsed)
-    assert search.queries == ["c2f"]
+    assert fake.queries == ["c2f"]
     assert [(item.sender, item.content) for item in result.replies] == [("tester", "Tester done.")]
     assert_no_stray_tasks()
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_a_cancelled_error_raised_by_on_event_while_an_agent_works_fails_that_agent(tmp_path: Path) -> None:
-    """EC-39 (r4, S4 R-3), INV-16, INV-17: an async on_event raises asyncio.CancelledError on builder's TOOL_CALLED, which builder's own turn flushes; builder gets one AGENT_FAILED naming CancelledError after that event, and the swarm ends QUIET at once instead of at timeout_seconds."""
+    """EC-11, INV-14 (r5 EC-39 kept): an async on_event raises asyncio.CancelledError on builder's tool_called, which builder's own turn flushes; builder gets one agent_failed naming CancelledError after that event, and the swarm ends QUIET at once instead of at timeout_seconds."""
     log = EventLog(mode="async")
     tester_idle = log.signal(IDLE, "tester")
 
@@ -384,7 +523,7 @@ async def test_a_cancelled_error_raised_by_on_event_while_an_agent_works_fails_t
             raise asyncio.CancelledError()
 
     log.hook(cancel_on_builder_tool)
-    # builder calls its tool only after tester's AGENT_IDLE was delivered, so builder's own flush is the one that hands TOOL_CALLED over.
+    # builder calls its tool only after tester's agent_idle was delivered, so builder's own flush is the one that hands tool_called over.
     scripted = ScriptedSwarm({"tester": [reply("Tester done.")], "builder": [after(tester_idle, tool_call("read_lines", {"path": "missing.txt"}))]})
     swarm = build_swarm(tmp_path, NAMES, timeout_seconds=CANCEL_TIMEOUT_SECONDS, on_event=log.callback)
     started = time.monotonic()
@@ -396,13 +535,13 @@ async def test_a_cancelled_error_raised_by_on_event_while_an_agent_works_fails_t
     assert seq_of(result.events, TOOL_CALLED, "builder") < seq_of(result.events, FAILED, "builder")
     assert [(item.sender, item.content) for item in result.replies] == [("tester", "Tester done.")]
     assert_no_stray_tasks()
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_a_cancelled_error_raised_by_on_event_on_an_idle_agent_fails_it_instead_of_waking_it(tmp_path: Path) -> None:
-    """EC-39 idle variant (r4, S4 R-3), INV-8, INV-14: on_event raises asyncio.CancelledError on tester's AGENT_IDLE, after tester was marked idle; tester gets one AGENT_FAILED naming CancelledError, builder's later message to it is refused as a stopped recipient, no AGENT_WOKE is recorded, and the swarm ends QUIET at once."""
+    """EC-11, INV-6, INV-14 (r5 EC-39 idle variant kept; the stopped-recipient refusal reversed to a success): on_event raises asyncio.CancelledError on tester's agent_idle; tester gets one agent_failed naming CancelledError, builder's later message to it is a success with the stopped-recipient text recorded sent then undelivered, no agent_woke is recorded, and the swarm ends QUIET at once."""
     log = EventLog()
     tester_idle = log.signal(IDLE, "tester")
 
@@ -411,6 +550,7 @@ async def test_a_cancelled_error_raised_by_on_event_on_an_idle_agent_fails_it_in
             raise asyncio.CancelledError()
 
     log.hook(cancel_on_tester_idle)
+    # The sync callback raises inside tester's own flush, so tester's agent_failed is recorded before builder's model call can return.
     scripted = ScriptedSwarm({"tester": [reply("Tester done.")], "builder": [after(tester_idle, send("tester", NOTE)), reply("Builder done.")]})
     swarm = build_swarm(tmp_path, NAMES, timeout_seconds=CANCEL_TIMEOUT_SECONDS, on_event=log.callback)
     started = time.monotonic()
@@ -421,18 +561,18 @@ async def test_a_cancelled_error_raised_by_on_event_on_an_idle_agent_fails_it_in
     _assert_unrequested_cancel_failed_only(result, "tester", elapsed)
     assert seq_of(result.events, IDLE, "tester") < seq_of(result.events, FAILED, "tester")
     assert of_kind(result.events, WOKE) == []
-    refusal = tool_result(scripted.calls_by("builder")[1], "message")
-    assert is_error(refusal) and template_regex(prompt_text("message_stopped_recipient"), recipient="tester").search(refusal), refusal
-    assert of_kind(result.events, SENT) == []
+    stopped = tool_result(scripted.calls_by("builder")[1], "message")
+    assert not is_error(stopped) and template_regex(prompt_text("message_stopped_recipient"), recipient="tester").search(stopped), stopped
+    _assert_sent_then_undelivered(result.events, "builder", "tester")
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Builder done.")]
-    # assert_event_invariants is not called: its replay lets an agent fail only while working, and here tester fails while idle (INV-14 allows it).
     assert_no_stray_tasks()
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
-async def test_an_unrequested_cancel_after_the_end_was_decided_does_not_fail_the_released_agent(tmp_path: Path) -> None:
-    """EC-39, INV-17, D-7 (r4, S4 R-3): on_event raises asyncio.CancelledError on tester's AGENT_IDLE, but tester is the last working agent, so its end check has already decided QUIET; the cancel is only re-raised, nobody gets AGENT_FAILED, and the swarm ends QUIET at once."""
+async def test_an_unrequested_cancel_after_the_end_was_decided_does_not_fail_the_agent(tmp_path: Path) -> None:
+    """INV-14 (r5 EC-39 guard kept: S5 mutant S5-M2): on_event raises asyncio.CancelledError on tester's agent_idle, but tester is the last working agent, so its turn end has already decided QUIET; nobody gets agent_failed, each agent has exactly one terminal event, and the swarm ends QUIET at once."""
     from vidbyte import AgentSwarmStopReason
 
     log = EventLog()
@@ -443,7 +583,7 @@ async def test_an_unrequested_cancel_after_the_end_was_decided_does_not_fail_the
             raise asyncio.CancelledError()
 
     log.hook(cancel_on_tester_idle)
-    # tester ends its turn only after builder is idle, so tester's own end check decides QUIET before its AGENT_IDLE is flushed (spec section 8.5).
+    # tester ends its turn only after builder is idle, so tester's own turn end decides QUIET before its agent_idle is flushed (spec section 8.5).
     scripted = ScriptedSwarm({"builder": [reply("Builder done.")], "tester": [after(builder_idle, reply("Tester done."))]})
     swarm = build_swarm(tmp_path, NAMES, timeout_seconds=CANCEL_TIMEOUT_SECONDS, on_event=log.callback)
     started = time.monotonic()
@@ -453,19 +593,21 @@ async def test_an_unrequested_cancel_after_the_end_was_decided_does_not_fail_the
 
     assert result.stop_reason is AgentSwarmStopReason.QUIET, f"{result.stop_reason.value} after {elapsed:.2f} s: {describe(result.events)}"
     assert of_kind(result.events, FAILED) == [], describe(result.events)
-    assert [(event.kind.value, event.agent) for event in result.events] == [(STARTED, "builder"), (STARTED, "tester"), (IDLE, "builder"), (IDLE, "tester"), (ENDED, "")]
+    stopping = only(result.events, STOPPING)
+    assert pairs(result.events[: stopping.sequence]) == [*start_pairs(NAMES), (MODEL_CALLED, "builder"), (IDLE, "builder"), (MODEL_CALLED, "tester"), (IDLE, "tester"), (STOPPING, "")], describe(result.events)
+    terminals = _terminals(result.events)
+    assert terminals["builder"] == [RELEASED] and len(terminals["tester"]) == 1 and terminals["tester"][0] in (RELEASED, CANCELLED), describe(result.events)
     assert result.events[-1].stop_reason is AgentSwarmStopReason.QUIET
     assert elapsed < CANCEL_TIMEOUT_SECONDS / 2, f"arun took {elapsed:.2f} s, waiting toward the {CANCEL_TIMEOUT_SECONDS} s time limit"
-    # INV-11 r4: replies may miss the agent whose unwinding was cut, but never holds anything but a released agent's last turn.
     assert {(item.sender, item.content) for item in result.replies} <= {("builder", "Builder done."), ("tester", "Tester done.")}
-    # assert_event_invariants is not called: its replies rule is stricter than INV-11 r4 allows here.
     assert_no_stray_tasks()
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_a_second_concurrent_arun_is_refused_and_a_later_arun_starts_fresh(tmp_path: Path) -> None:
-    """AC-15, EC-30, INV-19: arun while a run is in progress raises ConfigurationError and changes nothing; a later arun starts at sequence 1 with fresh agents and the new goal."""
+    """INV-40 (r5 AC-15 kept): arun while a run is in progress raises ConfigurationError and changes nothing; a later arun starts at sequence 1 with fresh agents and the new goal."""
     from vidbyte import AgentSwarmStopReason
     from vidbyte.lib.errors import ConfigurationError
 
@@ -491,7 +633,7 @@ async def test_a_second_concurrent_arun_is_refused_and_a_later_arun_starts_fresh
 
     for result in (first_result, third_result):
         assert result.stop_reason is AgentSwarmStopReason.QUIET
-        assert_event_invariants(result, NAMES, max_turns=500)
+        assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns)
     # The refused call left no trace in the first run, and the third run's events start again at 1.
     assert log.received == [*first_result.events, *third_result.events]
     assert [(item.sender, item.content) for item in third_result.replies] == [("builder", "Third run done."), ("tester", "Tester third.")]
@@ -503,14 +645,15 @@ async def test_a_second_concurrent_arun_is_refused_and_a_later_arun_starts_fresh
 
 @pytest.mark.asyncio
 async def test_a_swarm_runtime_runs_only_once(tmp_path: Path) -> None:
-    """INV-19, section 9.2: an AgentSwarmRuntime runs one swarm; a second arun on it raises ConfigurationError before any model call."""
+    """INV-40 (r5 INV-19 kept; the constructor takes workplace_created per spec 8.5): an AgentSwarmRuntime runs one swarm; a second arun on it raises ConfigurationError before any model call."""
     from vidbyte import AgentSwarmStopReason
     from vidbyte.agents.agent_swarm import AgentSwarmRuntime
     from vidbyte.lib.errors import ConfigurationError
 
     root = workplace_path(tmp_path)
     root.mkdir()
-    runtime = AgentSwarmRuntime(build_settings(tmp_path, NAMES), root)
+    settings = build_settings(tmp_path, NAMES)
+    runtime = AgentSwarmRuntime(settings, root, workplace_created=False)
     scripted = ScriptedSwarm({"builder": [reply("Builder done.")], "tester": [reply("Tester done.")]})
     with scripted.install():
         result = await run_swarm(runtime)
@@ -519,13 +662,13 @@ async def test_a_swarm_runtime_runs_only_once(tmp_path: Path) -> None:
             await runtime.arun(GOAL_AGAIN)
     assert len(scripted.calls) == calls_after_first
     assert result.stop_reason is AgentSwarmStopReason.QUIET
-    assert_event_invariants(result, NAMES, max_turns=500)
+    assert_event_invariants(result, NAMES, max_turns=settings.max_turns)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_cancelling_arun_propagates_and_the_swarm_can_run_again(tmp_path: Path) -> None:
-    """EC-19, INV-19: cancelling arun cancels the agent runs and raises CancelledError; the in-progress flag is cleared, so the next arun runs a fresh swarm."""
+    """INV-40 (r5 EC-19 kept): cancelling arun cancels the agent runs and raises CancelledError; the in-progress flag is cleared, so the next arun runs a fresh swarm."""
     from vidbyte import AgentSwarmStopReason
 
     entered, never = Signal("builder's first call"), Signal("a model answer that never comes")
@@ -549,7 +692,7 @@ async def test_cancelling_arun_propagates_and_the_swarm_can_run_again(tmp_path: 
     assert result.stop_reason is AgentSwarmStopReason.QUIET
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Second run done."), ("tester", "Tester second.")]
     assert scripted.calls_by("builder")[1].messages == []
-    assert_event_invariants(result, NAMES, max_turns=500)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns)
     scripted.assert_complete()
 
 
@@ -557,7 +700,7 @@ async def test_cancelling_arun_propagates_and_the_swarm_can_run_again(tmp_path: 
 @pytest.mark.parametrize("kind", [SENT, ENDED])
 @pytest.mark.parametrize("mode", ["sync", "async"])
 async def test_a_raising_on_event_callback_never_stops_the_swarm(tmp_path: Path, mode: str, kind: str) -> None:
-    """AC-10, EC-21, INV-15, INV-16: a sync or async on_event that raises on MESSAGE_SENT or SWARM_ENDED is still called once per event in order, and the swarm finishes normally."""
+    """INV-20 (r5 AC-10 kept): a sync or async on_event that raises on message_sent or swarm_ended is still called once per event in order, and the swarm finishes normally."""
     from vidbyte import AgentSwarmStopReason
 
     log = EventLog(mode=mode, raise_on=kind, yields=1 if mode == "async" else 0)
@@ -572,13 +715,13 @@ async def test_a_raising_on_event_callback_never_stops_the_swarm(tmp_path: Path,
     sent_reply = tool_result(scripted.calls_by("builder")[1], "message")
     assert not is_error(sent_reply)
     assert only(result.events, DELIVERED, "tester").peer == "builder"
-    assert_event_invariants(result, NAMES, max_turns=500, log=log, error_types=("CallbackBoom",))
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log, error_types=("CallbackBoom",))
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_the_event_outbox_delivers_each_event_once_in_order_even_with_concurrent_flushes() -> None:
-    """D-6, INV-13, INV-15: record numbers events 1..N at once; overlapping flushes hand each event to on_event exactly once, in order, one call at a time."""
+    """INV-20 (r5 D-6 kept): record numbers events 1..N at once; overlapping flushes hand each event to on_event exactly once, in order, one call at a time."""
     from vidbyte import AgentSwarmEventKind, AgentSwarmStopReason
     from vidbyte.agents.agent_swarm import AgentSwarmEvents
 
@@ -610,7 +753,7 @@ async def test_the_event_outbox_delivers_each_event_once_in_order_even_with_conc
 
 @pytest.mark.asyncio
 async def test_a_flush_cancelled_mid_callback_never_repeats_that_event() -> None:
-    """EC-23, D-6: an event is marked delivered before its callback is awaited, so a flush cancelled inside that callback never hands the same event over again, and cancellation is not swallowed."""
+    """INV-20 (r5 EC-23 kept): an event is marked delivered before its callback is awaited, so a flush cancelled inside that callback never hands the same event over again, and cancellation is not swallowed."""
     from vidbyte import AgentSwarmEventKind
     from vidbyte.agents.agent_swarm import AgentSwarmEvents
 
@@ -640,12 +783,13 @@ async def test_a_flush_cancelled_mid_callback_never_repeats_that_event() -> None
 
 @pytest.mark.asyncio
 async def test_event_time_counts_from_arun_not_from_building_the_runtime(tmp_path: Path) -> None:
-    """D-16, section 9.1 (r4, S4 R-11): elapsed_ms counts from the start of the run, so time spent between building an AgentSwarmRuntime and calling arun never shows in the events."""
+    """INV-28 (r5 D-16 kept; the first event is now workplace_prepared): elapsed_ms counts from the start of the run, so time spent between building an AgentSwarmRuntime and calling arun never shows in the events."""
     from vidbyte.agents.agent_swarm import AgentSwarmRuntime
 
     root = workplace_path(tmp_path)
     root.mkdir()
-    runtime = AgentSwarmRuntime(build_settings(tmp_path, NAMES), root)
+    settings = build_settings(tmp_path, NAMES)
+    runtime = AgentSwarmRuntime(settings, root, workplace_created=False)
     # The pack's one timed wait: what is under test is where the clock starts, which only real time between building and running can show.
     wait_seconds = 0.3
     await asyncio.sleep(wait_seconds)
@@ -654,15 +798,15 @@ async def test_event_time_counts_from_arun_not_from_building_the_runtime(tmp_pat
         result = await run_swarm(runtime)
 
     first = result.events[0]
-    assert (first.kind.value, first.agent) == (STARTED, "builder")
+    assert (first.kind.value, first.agent) == (PREPARED, "")
     assert first.elapsed_ms < wait_seconds * 1000 / 2, f"the first event reads {first.elapsed_ms} ms after a {wait_seconds} s wait before arun: the clock started when the runtime was built"
-    assert_event_invariants(result, NAMES, max_turns=500)
+    assert_event_invariants(result, NAMES, max_turns=settings.max_turns)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_tool_called_events_carry_name_and_status_and_skip_isdone(tmp_path: Path) -> None:
-    """AC-19, INV-21: bash and a failing read_lines each give one TOOL_CALLED with their status; the isDone that ends the turn gives none, and bash ran in the workplace."""
+    """INV-38, INV-39 (r5 AC-19 kept): bash and a failing read_lines each give one tool_called with their status; the isDone that ends the turn gives none, and bash ran in the workplace."""
     from vidbyte import AgentSwarmStopReason
     from vidbyte.lib.dataclasses.tools import ToolStatus
 
@@ -682,13 +826,13 @@ async def test_tool_called_events_carry_name_and_status_and_skip_isdone(tmp_path
     assert of_kind(result.events, TOOL_CALLED, "builder") == []
     assert (workplace_path(tmp_path) / "bash-note.txt").read_text(encoding="utf-8").strip() == "hello"
     assert only(result.events, IDLE, "tester").text == "Checked."
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
 
 
 @pytest.mark.asyncio
 async def test_a_tool_name_holding_a_newline_is_a_tool_error_not_a_failure(tmp_path: Path) -> None:
-    """EC-16 (b), section 9.1 (S4 R-8): a model that calls a tool whose name holds a newline gets the loop's tool error and keeps working; TOOL_CALLED records that non-blank name with status error, and nobody fails."""
+    """INV-14 (r5 EC-16 b, R-8 kept): a model that calls a tool whose name holds a newline gets the loop's tool error and keeps working; tool_called records that non-blank name with status error, and nobody fails."""
     from vidbyte import AgentSwarmStopReason
     from vidbyte.lib.dataclasses.tools import ToolStatus
 
@@ -705,5 +849,5 @@ async def test_a_tool_name_holding_a_newline_is_a_tool_error_not_a_failure(tmp_p
     assert is_error(tool_result(scripted.calls_by("builder")[1], odd_name))
     assert result.stop_reason is AgentSwarmStopReason.QUIET
     assert [(item.sender, item.content) for item in result.replies] == [("builder", "Builder done."), ("tester", "Tester done.")]
-    assert_event_invariants(result, NAMES, max_turns=500, log=log)
+    assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()

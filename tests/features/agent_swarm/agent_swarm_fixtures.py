@@ -1,13 +1,13 @@
 """FILE: tests/features/agent_swarm/agent_swarm_fixtures.py
 
-PURPOSE: Shared offline harness for the AgentSwarm feature pack: one scripted model runner that reaches every member agent the swarm builds inside arun, an on_event recorder that turns swarm state changes into Signals, blocking and raising search tools, settings builders under tmp_path, transcript readers, and the event oracle every run is checked against.
-ROLE IN CODEBASE: Imported by every test module in tests/features/agent_swarm/. It replaces only the model runner, at BaseAgent._runner_for_model (spec section 13), so the agent loop, the middleware pipeline, the prompt catalog, the file tools, bash, the filesystem, asyncio, and the settings validation all run for real.
-ARCHITECTURE NOTE: ScriptedSwarm routes each model call by agent name to that agent's list of steps (one continuous list across all its turns, because each member runs one loop for the whole swarm) or to a behaviour function, and records what the agent was sent. Becoming idle, waking, and failing happen inside the swarm, not on a model call, so tests wait for them through EventLog.signal(kind, agent), which the on_event callback sets (spec section 13, R-6). assert_event_invariants is the oracle: it replays result.events as a state machine and checks every invariant of spec section 6.1 that the event record can show.
-FUNCTION INVENTORY: member / build_settings / build_swarm / workplace_path build the subject; tool_call / reply / finish / send / fail / observe / after build steps; Gate and Signal order concurrent agents without sleeps; ScriptedSwarm.install patches the runner and ScriptedSwarm.calls_by / first_call / last_call / position / assert_complete read what happened; EventLog records on_event deliveries and sets Signals; SearchTool and BlockingSearchTool are developer search tools; run_swarm and guard_asyncio_run turn a hang into a failure; yield_to_loop is a zero-delay scheduler yield; tool_results / tool_result / is_error / user_messages / message_tool_calls / seen_text / prompt_text / template_regex / renderings read rendered output; of_kind / only / seq_of read events; assert_event_invariants is the oracle; assert_no_stray_tasks and snapshot check what is left behind.
-COMMON MODIFICATION PATTERNS: Add a step kind as a frozen dataclass plus one branch in ScriptedSwarm._respond. When the spec adds an event kind, add its allowed fields to _ALLOWED_FIELDS and its place in the lifecycle to assert_event_invariants.
-WHAT NOT TO DO IN THIS FILE: 1. Do not import anything from vidbyte.agents.agent_swarm, vidbyte.lib.dataclasses.agent_swarm, vidbyte.lib.enums.agent_swarm, vidbyte.lib.constants.agent_swarm, vidbyte.tools.toolsets.agent_swarm, or the new Prompt members at module level: before the feature exists that would make every module in the pack a collection error. 2. Do not mock the loop, the middleware pipeline, the catalog, the file tools, or bash (spec section 13). 3. Do not wait on wall-clock time; Gate, Signal and the blocking tool use asyncio events, their timeout only turns a hang into a failure, and yield_to_loop sleeps for zero seconds. 4. Do not encode feature wording here; tests take prompt text from the catalog.
-KNOWN EDGE CASES: The swarm contains exceptions raised by on_event, so an assertion inside an EventLog hook would only reach result.event_error_types; the oracle therefore checks event_error_types against the expected tuple. A runner that raises inside a member becomes AGENT_FAILED, so unscripted calls and guard failures are also kept in ScriptedSwarm.unscripted and ScriptedSwarm.problems, which assert_complete checks.
-RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm/spec.md sections 6, 8.5, 9.1, 9.2 and 13.
+PURPOSE: Shared offline harness for the AgentSwarm feature pack: one scripted model runner that reaches every member agent the swarm builds inside arun (and the compaction side call), an on_event recorder that turns swarm state changes into Signals, a recording fake for the Tavily HTTP call, a one-shot model retry seam, settings builders under tmp_path, transcript readers, and the event oracle every run is checked against.
+ROLE IN CODEBASE: Imported by every test module in tests/features/agent_swarm/. It replaces only the model runner, at BaseAgent._runner_for_model, and the Tavily client's HTTP search (docs/spec/agent-swarm-v2/spec.md section 13), so the agent loop, the middleware pipeline, the compaction engine, the prompt catalog, the file tools, bash, the filesystem, asyncio, and the settings validation all run for real.
+ARCHITECTURE NOTE: ScriptedSwarm routes each model call by agent name to that agent's list of steps (one continuous list across all its turns and compaction side calls, because each member runs one loop for the whole swarm) or to a behaviour function, and records what the agent was sent. Each response is stamped with the member's own provider and model, so UsageTracker parses Anthropic usage with Anthropic's parser (spec section 13). Becoming idle, waking, and stopping happen inside the swarm, not on a model call, so tests wait for them through EventLog.signal(kind, agent), which the on_event callback sets. assert_event_invariants is the oracle: it replays result.events as the spec's state machine for all twenty-four kinds and checks every invariant of spec section 6.1 that the event record can show.
+FUNCTION INVENTORY: member / build_settings / build_swarm / workplace_path build the subject; tool_call / calls / reply / finish / send / compact / search / fail / observe / after build steps; Gate and Signal order concurrent agents without sleeps; ScriptedSwarm.install patches the runner and ScriptedSwarm.calls_by / first_call / last_call / position / assert_complete read what happened; EventLog records on_event deliveries and sets Signals; FakeTavily stands in for the Tavily HTTP call; install_model_retry appends a one-shot retry middleware; run_swarm and guard_asyncio_run turn a hang into a failure; yield_to_loop is a zero-delay scheduler yield; tool_results / tool_result / is_error / user_messages / message_tool_calls / seen_text / prompt_text / template_regex / renderings read rendered output; of_kind / only / seq_of / pairs / describe read events; assert_event_invariants is the oracle; assert_no_stray_tasks and snapshot check what is left behind.
+COMMON MODIFICATION PATTERNS: Add a step kind as a frozen dataclass plus one branch in ScriptedSwarm._respond. When the spec adds an event kind, add its constant, its allowed fields to _ALLOWED_FIELDS, and its place in the lifecycle to _Replay.
+WHAT NOT TO DO IN THIS FILE: 1. Do not import anything from vidbyte.agents.agent_swarm, vidbyte.lib.dataclasses.agent_swarm, vidbyte.lib.enums.agent_swarm, vidbyte.lib.constants.agent_swarm, vidbyte.tools.toolsets.agent_swarm, vidbyte.middleware.builtins.agent_swarm_observer, or the new Prompt members at module level: before the feature exists that would make every module in the pack a collection error. 2. Do not mock the loop, the middleware pipeline, the compaction engine, the catalog, AgentSwarmEvents, the file tools, or bash (spec section 13). 3. Do not wait on wall-clock time; Gate, Signal and FakeTavily use asyncio events, their timeout only turns a hang into a failure, and yield_to_loop sleeps for zero seconds. 4. Do not encode feature wording here; tests take prompt text from the catalog.
+KNOWN EDGE CASES: The swarm contains exceptions raised by on_event, so an assertion inside an EventLog hook would only reach result.event_error_types; the oracle therefore checks event_error_types against the expected tuple. A runner that raises inside a member becomes agent_failed, so unscripted calls and guard failures are also kept in ScriptedSwarm.unscripted and ScriptedSwarm.problems, which assert_complete checks. Two member tasks cancelled by the time limit record their agent_cancelled events in the task group's order, which is a set's order, so tests compare that window as a set.
+RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm-v2/spec.md sections 6, 8.5, 9.1 and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q
 """
 
@@ -32,34 +32,33 @@ import pytest
 
 from vidbyte import BaseAgent
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.runners import TextModelResponse
-from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
+from vidbyte.middleware.base import AgentMiddleware
 
 if TYPE_CHECKING:
     from vidbyte.agents.agent_swarm import AgentSwarm, AgentSwarmSettings
     from vidbyte.lib.dataclasses.agent_swarm import AgentSwarmEvent, AgentSwarmMember
 
 MODEL = "gpt-4.1"
+ANTHROPIC_MODEL = "claude-sonnet-5"
 # The section 4 goal; every test that does not care about the goal's text uses it.
 GOAL = "Build a Celsius-to-Fahrenheit command-line tool with tests."
-# Each member's own system prompt, as in the section 4 snippet plus two more roles.
-PROMPTS: Mapping[str, str] = {
-    "builder": "You write the code.",
-    "tester": "You write and run the tests.",
-    "reviewer": "You review every change.",
-    "docs": "You write the documentation.",
-}
-# A failure-only guard: a Gate, Signal or blocking tool that is never released fails the test after this long instead of hanging it.
+# A failure-only guard: a Gate, Signal or blocking fake that is never released fails the test after this long instead of hanging it.
 GUARD_SECONDS = 20.0
 # A failure-only guard around a whole arun: longer than GUARD_SECONDS so a stuck Signal reports first.
 RUN_GUARD_SECONDS = 60.0
 DEFAULT_USAGE: Mapping[str, int] = {"input_tokens": 3, "output_tokens": 2}
-# The loop's own provisional answer to a refused isDone (vidbyte/agents/runtime.py, spec EC-5).
+# The loop's own provisional answer to a refused isDone (vidbyte/agents/runtime.py).
 FINISH_NOT_ACCEPTED = "finish attempt not accepted yet; continue with the next message"
-# A key-shaped string the provider-key matcher accepts as OpenAI's; never a real key.
+# Key-shaped strings the provider-key matcher accepts as OpenAI's and Anthropic's, and a Tavily-shaped key; never real keys.
 FAKE_OPENAI_KEY = "sk-proj-SwarmFakeKey0000AAAA1111"
+FAKE_ANTHROPIC_KEY = "sk-ant-SwarmFakeKey0000AAAA1111"
+FAKE_TAVILY_KEY = "tvly-SwarmFakeKey0000AAAA1111"
+TAVILY_TOOL = "tavily_search"
+# INV-1: the nine section leaves in their fixed order; the web-search section only when web_search is set.
+SECTION_LEAVES = ("system_environment", "system_tools", "system_web_search", "system_messaging", "system_turns", "system_goal", "system_instructions", "system_objective", "system_thoroughness")
 
 # Event kind values (spec section 8.5), as strings so this module never imports the feature at load time.
 STARTED = "agent_started"
@@ -70,6 +69,28 @@ IDLE = "agent_idle"
 WOKE = "agent_woke"
 FAILED = "agent_failed"
 ENDED = "swarm_ended"
+PREPARED = "workplace_prepared"
+CREATED = "agent_created"
+REFUSED = "message_refused"
+WAKE_REFUSED = "wake_refused"
+UNDELIVERED = "message_undelivered"
+STOPPING = "swarm_stopping"
+RELEASED = "agent_released"
+CANCELLED = "agent_cancelled"
+EXITED = "agent_exited"
+MODEL_CALLED = "model_called"
+MODEL_ERROR = "model_error"
+TRIMMED = "history_trimmed"
+TRUNCATED = "tool_result_truncated"
+FILE_CHANGED = "file_changed"
+COMMAND_FAILED = "command_failed"
+COMPACTION = "compaction"
+ALL_KINDS = (
+    STARTED, TOOL_CALLED, SENT, DELIVERED, IDLE, WOKE, FAILED, ENDED, PREPARED, CREATED, REFUSED, WAKE_REFUSED,
+    UNDELIVERED, STOPPING, RELEASED, CANCELLED, EXITED, MODEL_CALLED, MODEL_ERROR, TRIMMED, TRUNCATED, FILE_CHANGED,
+    COMMAND_FAILED, COMPACTION,
+)
+TERMINAL_KINDS = frozenset({RELEASED, CANCELLED, FAILED, EXITED})
 
 _CALL_IDS = itertools.count(1)
 _FIELD = re.compile(r"\{\{|\}\}|\{([^{}]*)\}")
@@ -78,12 +99,11 @@ _FIELD = re.compile(r"\{\{|\}\}|\{([^{}]*)\}")
 # ---------------------------------------------------------------- builders
 
 
-def member(name: str, *, system_prompt: str | None = None, provider: str = "openai", model_name: str = MODEL) -> AgentSwarmMember:
-    """One AgentSwarmMember; its own prompt defaults to PROMPTS[name] or a generic line."""
+def member(name: str, *, provider: str = "openai", model_name: str = MODEL) -> AgentSwarmMember:
+    """One AgentSwarmMember: a name, a provider and a model, and no prompt of its own (spec FR-1)."""
     from vidbyte.lib.dataclasses.agent_swarm import AgentSwarmMember
 
-    prompt = system_prompt if system_prompt is not None else PROMPTS.get(name, f"You are {name}; you help the swarm.")
-    return AgentSwarmMember(name=name, system_prompt=prompt, provider=provider, model_name=model_name)
+    return AgentSwarmMember(name=name, provider=provider, model_name=model_name)
 
 
 def workplace_path(tmp_path: Path) -> Path:
@@ -106,6 +126,11 @@ def build_swarm(tmp_path: Path, names: Sequence[str] = ("builder", "tester"), **
     return AgentSwarm(build_settings(tmp_path, names, **fields))
 
 
+def web_search_fields() -> dict[str, Any]:
+    """The settings fields that select Tavily with a fake key."""
+    return {"web_search": "tavily", "web_search_api_key": FAKE_TAVILY_KEY}
+
+
 # ---------------------------------------------------------------- scripted steps
 
 
@@ -113,6 +138,12 @@ def build_swarm(tmp_path: Path, names: Sequence[str] = ("builder", "tester"), **
 class ToolStep:
     name: str
     args: Mapping[str, Any]
+    usage: Mapping[str, int]
+
+
+@dataclass(frozen=True)
+class MultiToolStep:
+    steps: tuple[ToolStep, ...]
     usage: Mapping[str, int]
 
 
@@ -127,17 +158,22 @@ class RaiseStep:
     error: BaseException
 
 
-Step = ToolStep | ReplyStep | RaiseStep | Callable[["ModelCall"], Any]
+Step = ToolStep | MultiToolStep | ReplyStep | RaiseStep | Callable[["ModelCall"], Any]
 
 
 def tool_call(name: str, args: Mapping[str, Any], usage: Mapping[str, int] | None = None) -> ToolStep:
     """The model asks for one tool call."""
-    return ToolStep(name, dict(args), dict(usage or DEFAULT_USAGE))
+    return ToolStep(name, dict(args), dict(DEFAULT_USAGE if usage is None else usage))
+
+
+def calls(*steps: ToolStep, usage: Mapping[str, int] | None = None) -> MultiToolStep:
+    """The model asks for several tool calls in one response; the loop runs them in order (spec EC-4, EC-22)."""
+    return MultiToolStep(tuple(steps), dict(DEFAULT_USAGE if usage is None else usage))
 
 
 def reply(text: str, usage: Mapping[str, int] | None = None) -> ReplyStep:
-    """The model answers with text and no tool call: a plain turn end."""
-    return ReplyStep(text, dict(usage or DEFAULT_USAGE))
+    """The model answers with text and no tool call: a plain turn end, or a compaction summary."""
+    return ReplyStep(text, dict(DEFAULT_USAGE if usage is None else usage))
 
 
 def finish(text: str) -> ToolStep:
@@ -145,9 +181,19 @@ def finish(text: str) -> ToolStep:
     return tool_call("isDone", {"final_answer": text})
 
 
-def send(to: str, text: str) -> ToolStep:
+def send(to: object, text: object, usage: Mapping[str, int] | None = None) -> ToolStep:
     """The model calls the swarm's message tool."""
-    return tool_call("message", {"to": to, "text": text})
+    return tool_call("message", {"to": to, "text": text}, usage)
+
+
+def compact(focus: str | None = None, usage: Mapping[str, int] | None = None) -> ToolStep:
+    """The model calls the swarm's compact tool, with or without a focus."""
+    return tool_call("compact", {} if focus is None else {"focus": focus}, usage)
+
+
+def search(query: str) -> ToolStep:
+    """The model calls the Tavily search tool."""
+    return tool_call(TAVILY_TOOL, {"query": query})
 
 
 def fail(error: BaseException) -> RaiseStep:
@@ -176,10 +222,15 @@ def after(waitable: Gate | Signal, then: Step) -> Callable[[ModelCall], Any]:
 
 
 def provider_error(text: str = "openai returned 503: upstream overloaded") -> BaseException:
-    """The provider error a model call raises in the failure tests (spec AC-7, R-1)."""
+    """The provider error a model call raises in the failure tests."""
     from vidbyte.lib.errors import ProviderRequestError
 
     return ProviderRequestError(text, provider="openai", status_code=503)
+
+
+def error_line(error: BaseException) -> str:
+    """The "<ExceptionType>: <message>" text model_error and agent_failed carry (spec INV-23)."""
+    return f"{type(error).__name__}: {error}"
 
 
 async def yield_to_loop(times: int = 1) -> None:
@@ -234,7 +285,7 @@ class Signal:
 
 @dataclass
 class ModelCall:
-    """What one agent sent on one model call."""
+    """What one agent sent on one model call (a compaction side call included)."""
 
     agent: str
     prompt: str
@@ -246,12 +297,14 @@ class ModelCall:
 
 
 class _ScriptedRunner:
-    def __init__(self, swarm: ScriptedSwarm, agent: str) -> None:
+    def __init__(self, swarm: ScriptedSwarm, agent: str, provider: ModelProvider, model: str) -> None:
         self.swarm = swarm
         self.agent = agent
+        self.provider = provider
+        self.model = model
 
     async def arun(self, prompt: str, **options: Any) -> object:
-        return await self.swarm.answer(self.agent, prompt, options)
+        return await self.swarm.answer(self.agent, prompt, options, self.provider, self.model)
 
 
 Behaviour = Callable[["ModelCall"], Any]
@@ -275,12 +328,15 @@ class ScriptedSwarm:
         swarm = self
 
         def runner_for(agent: BaseAgent) -> tuple[object, str]:
-            return _ScriptedRunner(swarm, agent.name), RUNNER_TYPE_TEXT
+            # Stamp the member's own provider and model on every response (spec section 13: the one fixture change S2 owns).
+            config = agent.runner_config
+            provider = ModelProvider(str(getattr(config.provider, "value", config.provider)))
+            return _ScriptedRunner(swarm, agent.name, provider, str(config.model_name)), RUNNER_TYPE_TEXT
 
         with patch.object(BaseAgent, "_runner_for_model", new=runner_for):
             yield self
 
-    async def answer(self, agent: str, prompt: str, options: Mapping[str, Any]) -> object:
+    async def answer(self, agent: str, prompt: str, options: Mapping[str, Any], provider: ModelProvider, model: str) -> object:
         call = self._record(agent, prompt, options)
         index = self.cursor.get(agent, 0)
         step: Any
@@ -303,7 +359,7 @@ class ScriptedSwarm:
         except AssertionError as exc:
             self.problems.append(str(exc))
             raise
-        response = self._respond(step)
+        response = self._respond(step, provider, model)
         self.events.append(f"{agent} answered {index + 1}")
         return response
 
@@ -316,7 +372,7 @@ class ScriptedSwarm:
             if isinstance(function, Mapping) and "name" in function:
                 name = str(function["name"])
                 names.append(name)
-                schemas[name] = copy.deepcopy(function.get("parameters"))
+                schemas[name] = copy.deepcopy(function.get("parameters", function.get("input_schema")))
                 descriptions[name] = str(function.get("description") or "")
         call = ModelCall(
             agent=agent,
@@ -331,28 +387,33 @@ class ScriptedSwarm:
         return call
 
     @staticmethod
-    def _respond(step: Any) -> object:
+    def _respond(step: Any, provider: ModelProvider, model: str) -> object:
         if isinstance(step, RaiseStep):
             raise step.error
         if isinstance(step, ReplyStep):
-            return TextModelResponse(provider=ModelProvider.OPENAI, model=MODEL, text=step.text, raw={}, usage=dict(step.usage))
-        if isinstance(step, ToolStep):
-            output = [{"type": "function_call", "name": step.name, "arguments": json.dumps(step.args), "call_id": f"call-{next(_CALL_IDS)}"}]
-            return SimpleNamespace(text="", raw={"output": output}, provider=ModelProvider.OPENAI, model=MODEL, usage=dict(step.usage))
+            return TextModelResponse(provider=provider, model=model, text=step.text, raw={}, usage=dict(step.usage))
+        if isinstance(step, ToolStep | MultiToolStep):
+            steps = step.steps if isinstance(step, MultiToolStep) else (step,)
+            if provider is ModelProvider.ANTHROPIC:
+                content = [{"type": "tool_use", "id": f"toolu_{next(_CALL_IDS)}", "name": item.name, "input": dict(item.args)} for item in steps]
+                raw: dict[str, Any] = {"content": content, "stop_reason": "tool_use"}
+            else:
+                raw = {"output": [{"type": "function_call", "name": item.name, "arguments": json.dumps(item.args), "call_id": f"call-{next(_CALL_IDS)}"} for item in steps]}
+            return SimpleNamespace(text="", raw=raw, provider=provider, model=model, usage=dict(step.usage))
         raise AssertionError(f"not a scripted step: {step!r}")
 
     def calls_by(self, agent: str) -> list[ModelCall]:
         return [call for call in self.calls if call.agent == agent]
 
     def first_call(self, agent: str) -> ModelCall:
-        calls = self.calls_by(agent)
-        assert calls, f"agent {agent!r} was never called; called: {sorted({c.agent for c in self.calls})}"
-        return calls[0]
+        found = self.calls_by(agent)
+        assert found, f"agent {agent!r} was never called; called: {sorted({c.agent for c in self.calls})}"
+        return found[0]
 
     def last_call(self, agent: str) -> ModelCall:
-        calls = self.calls_by(agent)
-        assert calls, f"agent {agent!r} was never called"
-        return calls[-1]
+        found = self.calls_by(agent)
+        assert found, f"agent {agent!r} was never called"
+        return found[-1]
 
     def position(self, mark: str) -> int:
         assert mark in self.events, f"{mark!r} never happened; marks: {self.events}"
@@ -370,7 +431,7 @@ class ScriptedSwarm:
 
 
 class CallbackBoom(Exception):
-    """The exception an EventLog raises on purpose (spec AC-10)."""
+    """The exception an EventLog raises on purpose."""
 
 
 Hook = Callable[["AgentSwarmEvent"], Any]
@@ -441,51 +502,73 @@ class EventLog:
             self.active -= 1
 
 
-# ---------------------------------------------------------------- developer search tools
+# ---------------------------------------------------------------- the web-search boundary and the retry seam
 
 
-class SearchTool(BaseTool):
-    """A developer search tool; `error` makes execute raise it (spec EC-16 (b))."""
+class FakeTavily:
+    """Stands in for the Tavily HTTP call (TavilyClient.search): records each query and the key its client holds, then answers, blocks until released, or raises."""
 
-    def __init__(self, name: str = "web_search", *, error: BaseException | None = None) -> None:
-        # BaseTool.name is a read-only property over spec().name, so the name is kept privately and served by spec().
-        self._tool_name = name
+    def __init__(self, *, block: bool = False, error: BaseException | None = None) -> None:
+        self.block = block
         self.error = error
         self.queries: list[str] = []
-
-    def spec(self) -> ToolSpec:
-        return ToolSpec(
-            name=self._tool_name,
-            description="Search the public web and return short result snippets for a query.",
-            permission=ToolPermission.READ,
-            input_schema={"type": "object", "properties": {"query": {"type": "string", "description": "What to search for."}}, "required": ["query"]},
-        )
-
-    async def execute(self, call: ToolCall) -> ToolResult:
-        self.queries.append(str(call.arguments.get("query", "")))
-        if self.error is not None:
-            raise self.error
-        return ToolResult.success(self.name, f"results for {call.arguments.get('query')}")
-
-
-class BlockingSearchTool(SearchTool):
-    """A search tool whose execute sets `entered` and then holds until `release` is set, so an agent stays mid-turn."""
-
-    def __init__(self, name: str = "web_search") -> None:
-        super().__init__(name)
-        self.entered = Signal(f"{name} entered")
-        self.release = Signal(f"{name} released")
+        self.keys: list[str] = []
+        self.entered = Signal(f"{TAVILY_TOOL} entered")
+        self.release = Signal(f"{TAVILY_TOOL} released")
         self.problems: list[str] = []
 
-    async def execute(self, call: ToolCall) -> ToolResult:
-        self.queries.append(str(call.arguments.get("query", "")))
+    @contextmanager
+    def install(self) -> Iterator[FakeTavily]:
+        from vidbyte.tools.builtins.operations.clients.tavily import TavilyClient
+
+        fake = self
+
+        async def fake_search(client: Any, query: str, *, max_results: int = 5, search_depth: str = "basic") -> object:
+            return await fake.answer(client, query)
+
+        with patch.object(TavilyClient, "search", new=fake_search):
+            yield self
+
+    async def answer(self, client: Any, query: str) -> object:
+        from vidbyte.lib.dataclasses.operations import SearchHit, SearchPayload
+
+        self.queries.append(query)
+        self.keys.append(str(getattr(client, "_api_key", "")))
         self.entered.set()
-        try:
-            await self.release.wait(self.name)
-        except AssertionError as exc:
-            self.problems.append(str(exc))
-            return ToolResult.error(self.name, str(exc))
-        return ToolResult.success(self.name, f"results for {call.arguments.get('query')}")
+        if self.block:
+            try:
+                await self.release.wait(TAVILY_TOOL)
+            except AssertionError as exc:
+                self.problems.append(str(exc))
+        if self.error is not None:
+            raise self.error
+        hit = SearchHit(title="Celsius to Fahrenheit", url="https://example.com/c2f", snippet=f"notes on {query}")
+        return SearchPayload(provider=str(client.provider), query=query, hits=(hit,), attempts=1, billable_units=1)
+
+
+class RetryModelErrorOnce(AgentMiddleware):
+    """Retries each agent's first failed model attempt at once: the loop's own retry seam, which the member agent does not install (spec AC-10)."""
+
+    def __init__(self, retried: list[str]) -> None:
+        self.retried = retried
+
+    async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        if ctx.agent_name in self.retried:
+            return MiddlewareDecision.continue_()
+        self.retried.append(ctx.agent_name)
+        return MiddlewareDecision.retry("agent swarm test retry")
+
+
+def install_model_retry(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Appends RetryModelErrorOnce after every agent's own middleware (so the swarm observer sees each error first); returns the agents it retried."""
+    retried: list[str] = []
+    original = BaseAgent._runtime_middleware
+
+    def runtime_middleware(agent: BaseAgent) -> tuple[AgentMiddleware, ...]:
+        return (*original(agent), RetryModelErrorOnce(retried))
+
+    monkeypatch.setattr(BaseAgent, "_runtime_middleware", runtime_middleware)
+    return retried
 
 
 # ---------------------------------------------------------------- hang guards
@@ -519,7 +602,7 @@ def guard_asyncio_run(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def assert_no_stray_tasks() -> None:
-    """No task but the current one is still pending: no member run was left waiting (spec INV-11, INV-12)."""
+    """No task but the current one is still pending: no member run was left waiting."""
     current = asyncio.current_task()
     stray = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
     assert not stray, f"tasks still pending after arun returned: {stray}"
@@ -573,6 +656,13 @@ def prompt_text(leaf: str) -> str:
     from vidbyte.prompts import Prompts
 
     return Prompts().get(Prompt[f"AGENT_SWARM_{leaf.upper()}"])
+
+
+def shared_system_prompt(name: str, names: Sequence[str], workplace: Path, *, search_tool: str | None = None) -> str:
+    """The system prompt INV-1 says member `name` receives before the loop prompt: the section leaves joined by one blank line, rendered with its name, its peers, the workplace and the search tool name."""
+    sections = [leaf for leaf in SECTION_LEAVES if search_tool is not None or leaf != "system_web_search"]
+    values = {"name": name, "peers": ", ".join(other for other in names if other != name), "workplace": str(workplace), "search_tool": search_tool or ""}
+    return "\n\n".join(prompt_text(leaf).strip().format(**values) for leaf in sections)
 
 
 def template_regex(template: str, **known: object) -> re.Pattern[str]:
@@ -632,15 +722,29 @@ def seq_of(events: Sequence[Any], kind: str, agent: str | None = None, nth: int 
     return int(found[nth - 1].sequence)
 
 
+def pairs(events: Sequence[Any]) -> list[tuple[str, str]]:
+    """Each event as (kind value, agent), in order: the shape exact event-list assertions compare."""
+    return [(event.kind.value, event.agent) for event in events]
+
+
+def start_pairs(names: Sequence[str]) -> list[tuple[str, str]]:
+    """The fixed start of every run (spec INV-17, AC-2): workplace_prepared, agent_created per member, agent_started per member."""
+    return [(PREPARED, ""), *((CREATED, name) for name in names), *((STARTED, name) for name in names)]
+
+
 def describe(events: Sequence[Any]) -> list[str]:
     """A compact, readable listing of events for assertion messages."""
-    return [f"{e.sequence} {e.kind.value} {e.agent}{'->' + e.peer if e.peer else ''}" for e in events]
+    return [f"{e.sequence} {e.kind.value} {e.agent}{'->' + e.peer if e.peer else ''}{' #' + str(e.message_id) if e.message_id else ''}" for e in events]
 
 
 # ---------------------------------------------------------------- the oracle
 
-_DEFAULTS: Mapping[str, Any] = {"peer": "", "message_id": 0, "text": "", "tool_name": "", "tool_status": None, "stop_reason": None}
-# The fields each kind may set (spec section 9.1); every other field must keep its default.
+_DEFAULTS: Mapping[str, Any] = {
+    "peer": "", "message_id": 0, "text": "", "tool_name": "", "tool_status": None, "stop_reason": None,
+    "input_tokens": 0, "output_tokens": 0, "cached_tokens": 0, "model_calls": 0, "messages_dropped": 0, "omitted_chars": 0,
+    "path": "", "compaction_trigger": None, "agent_state": None, "folder_state": None,
+}
+# The fields each kind may set (spec section 8.5, _KIND_FIELDS); every other field must keep its default.
 _ALLOWED_FIELDS: Mapping[str, frozenset[str]] = {
     STARTED: frozenset(),
     TOOL_CALLED: frozenset({"tool_name", "tool_status"}),
@@ -650,111 +754,257 @@ _ALLOWED_FIELDS: Mapping[str, frozenset[str]] = {
     WOKE: frozenset(),
     FAILED: frozenset({"text"}),
     ENDED: frozenset({"stop_reason"}),
+    PREPARED: frozenset({"path", "folder_state"}),
+    CREATED: frozenset(),
+    REFUSED: frozenset({"peer", "text"}),
+    WAKE_REFUSED: frozenset({"peer", "message_id"}),
+    UNDELIVERED: frozenset({"peer", "message_id"}),
+    STOPPING: frozenset({"stop_reason"}),
+    RELEASED: frozenset(),
+    CANCELLED: frozenset({"agent_state"}),
+    EXITED: frozenset({"text"}),
+    MODEL_CALLED: frozenset({"input_tokens", "output_tokens", "cached_tokens", "model_calls"}),
+    MODEL_ERROR: frozenset({"text"}),
+    TRIMMED: frozenset({"messages_dropped"}),
+    TRUNCATED: frozenset({"tool_name", "omitted_chars"}),
+    FILE_CHANGED: frozenset({"path", "peer"}),
+    COMMAND_FAILED: frozenset({"text"}),
+    COMPACTION: frozenset({"compaction_trigger", "text", "input_tokens", "messages_dropped"}),
 }
+_SWARM_KINDS = frozenset({PREPARED, STOPPING, ENDED})
+_DERIVED = frozenset({TRUNCATED, FILE_CHANGED, COMMAND_FAILED})
+# Kinds an agent records only while it is working: inside a turn, between a model call and its turn end.
+_WORKING_ONLY = frozenset({TOOL_CALLED, SENT, REFUSED, DELIVERED, MODEL_CALLED, MODEL_ERROR, TRIMMED, TRUNCATED, FILE_CHANGED, COMMAND_FAILED, COMPACTION})
+_COMMAND_FAILED_TEXT = re.compile(r"(exit code -?\d+|timeout)")
+
+
+class _Replay:
+    """The per-agent and per-message state machine of spec sections 6.1 and 9.1, fed one event at a time."""
+
+    def __init__(self, events: Sequence[Any], names: Sequence[str], max_turns: int) -> None:
+        self.events = events
+        self.names = list(names)
+        self.max_turns = max_turns
+        self.trace = describe(events)
+        self.state: dict[str, str | None] = {name: None for name in names}
+        self.terminal: dict[str, str] = {}
+        self.pending: dict[str, list[int]] = {name: [] for name in names}
+        self.sent: dict[int, Any] = {}
+        self.resolved: set[int] = set()
+        self.wake_refused: set[int] = set()
+        self.last_idle_text: dict[str, str] = {}
+        self.last_base: dict[str, Any] = {}
+        self.model_calls: dict[str, int] = {}
+        self.writers: dict[str, str] = {}
+        self.turns = 0
+        self.stopping_at: int | None = None
+        self.undelivered_at_stop: list[int] = []
+
+    def next_ids(self, index: int, count: int) -> list[tuple[str, str, int]]:
+        return [(e.kind.value, e.agent, e.message_id) for e in self.events[index + 1 : index + 1 + count]]
+
+    def step(self, index: int, event: Any, stop: str) -> None:
+        kind, agent = event.kind.value, event.agent
+        follower = self.events[index + 1]
+        stopped = self.stopping_at is not None
+        if kind == PREPARED:
+            return
+        if kind == STOPPING:
+            self.stop_block(index, stop)
+            return
+        if agent in self.terminal:
+            # INV-14: after its terminal event only a late message to it, marked undelivered, may name it.
+            assert kind == UNDELIVERED, f"{kind} for {agent} after its {self.terminal[agent]}: {self.trace}"
+        if kind in _WORKING_ONLY:
+            assert self.state[agent] == "working", f"{kind} for {agent} while {self.state[agent]}: {self.trace}"
+        if kind not in _DERIVED and kind != UNDELIVERED:
+            self.last_base[agent] = event
+        if kind == CREATED:
+            assert self.state[agent] is None, f"{agent} created twice: {self.trace}"
+            self.state[agent] = "created"
+        elif kind == STARTED:
+            assert self.state[agent] == "created", f"{agent} started while {self.state[agent]}: {self.trace}"
+            self.state[agent] = "working"
+            self.turns += 1
+        elif kind == IDLE:
+            self.idle(index, event, stopped, follower)
+        elif kind == WOKE:
+            # INV-9, INV-13: a wake never passes the turn budget and never follows the stop.
+            assert not stopped and self.state[agent] == "idle", f"{agent} woke while {self.state[agent]} (stopped={stopped}): {self.trace}"
+            assert self.turns < self.max_turns, f"wake #{self.turns + 1} passes max_turns={self.max_turns}: {self.trace}"
+            self.state[agent] = "working"
+            self.turns += 1
+        elif kind == WAKE_REFUSED:
+            mid = event.message_id
+            assert not stopped and self.state[agent] == "idle" and self.turns >= self.max_turns, f"wake_refused #{event.sequence} out of place: {self.trace}"
+            assert mid in self.pending[agent] and mid not in self.wake_refused and self.sent[mid].agent == event.peer, f"wake_refused #{event.sequence} names no waiting message: {self.trace}"
+            self.wake_refused.add(mid)
+        elif kind == SENT:
+            self.sent_message(index, event, stopped, follower)
+        elif kind == DELIVERED:
+            source = self.sent.get(event.message_id)
+            assert not stopped and source is not None and (source.agent, source.peer) == (event.peer, agent), f"delivery #{event.sequence} misrouted or after the stop: {self.trace}"
+            assert event.message_id not in self.resolved and self.pending[agent][:1] == [event.message_id], f"delivery #{event.sequence} repeated or out of acceptance order: {self.trace}"
+            self.pending[agent].pop(0)
+            self.resolved.add(event.message_id)
+        elif kind == UNDELIVERED:
+            source = self.sent.get(event.message_id)
+            assert source is not None and (source.agent, source.peer) == (event.peer, agent), f"undelivered #{event.sequence} misrouted: {self.trace}"
+            assert event.message_id not in self.resolved and event.message_id in self.pending[agent], f"message {event.message_id} resolved twice: {self.trace}"
+            self.pending[agent].remove(event.message_id)
+            self.resolved.add(event.message_id)
+        elif kind in TERMINAL_KINDS:
+            self.end(index, event, stopped)
+        else:
+            self.observation(event)
+
+    def idle(self, index: int, event: Any, stopped: bool, follower: Any) -> None:
+        agent = event.agent
+        assert self.state[agent] == "working", f"{agent} went idle while {self.state[agent]}: {self.trace}"
+        self.state[agent] = "idle"
+        self.last_idle_text[agent] = event.text
+        if stopped or not self.pending[agent]:
+            return
+        # INV-9, INV-10: a turn end with mail wakes at once with budget left, else refuses one wake per waiting message.
+        if self.turns < self.max_turns:
+            assert (follower.kind.value, follower.agent) == (WOKE, agent), f"{agent} went idle holding mail {self.pending[agent]} with turns left: {self.trace}"
+        else:
+            waiting = [mid for mid in self.pending[agent] if mid not in self.wake_refused]
+            assert self.next_ids(index, len(waiting)) == [(WAKE_REFUSED, agent, mid) for mid in waiting], f"{agent}'s turn end did not refuse each waiting wake: {self.trace}"
+
+    def sent_message(self, index: int, event: Any, stopped: bool, follower: Any) -> None:
+        # INV-6, D-4: any member is a valid recipient, the sender included; the id is the event's own sequence.
+        recipient = event.peer
+        assert event.message_id == event.sequence and recipient in self.names and event.text.strip(), f"bad message_sent {event!r}"
+        self.sent[event.sequence] = event
+        self.pending[recipient].append(event.sequence)
+        if stopped or self.terminal.get(recipient) in (FAILED, EXITED):
+            assert (follower.kind.value, follower.agent, follower.message_id) == (UNDELIVERED, recipient, event.sequence), f"message {event.sequence} to a stopped {recipient} was not marked undelivered at once: {self.trace}"
+        elif self.state[recipient] == "idle":
+            expected = WOKE if self.turns < self.max_turns else WAKE_REFUSED
+            assert (follower.kind.value, follower.agent) == (expected, recipient), f"message {event.sequence} to idle {recipient} was not followed by {expected}: {self.trace}"
+
+    def end(self, index: int, event: Any, stopped: bool) -> None:
+        kind, agent = event.kind.value, event.agent
+        assert agent not in self.terminal, f"{agent} has two terminal events: {self.trace}"
+        assert self.state[agent] in ("working", "idle"), f"{kind} for {agent} while {self.state[agent]}: {self.trace}"
+        if kind == RELEASED:
+            assert stopped, f"{agent} released before swarm_stopping: {self.trace}"
+        if kind == EXITED:
+            assert not stopped and self.state[agent] == "working" and event.text.strip(), f"bad agent_exited {event!r}: {self.trace}"
+        if kind == FAILED:
+            assert event.text.strip(), f"agent_failed for {agent} names no cause"
+        self.terminal[agent] = kind
+        if kind in (FAILED, EXITED):
+            # INV-14: a failed or exited agent's inbox is marked undelivered in the same block.
+            expected = [(UNDELIVERED, agent, mid) for mid in self.pending[agent]]
+            assert self.next_ids(index, len(expected)) == expected, f"{agent}'s inbox was not marked undelivered with its {kind}: {self.trace}"
+
+    def stop_block(self, index: int, stop: str) -> None:
+        assert self.stopping_at is None, f"two swarm_stopping events: {self.trace}"
+        self.stopping_at = index
+        everyone_out = all(self.terminal.get(name) in (FAILED, EXITED) for name in self.names)
+        if stop in ("quiet", "max_turns", "failed"):
+            # INV-12: these reasons are decided only when nobody is working; FAILED exactly when everyone failed or exited.
+            assert all(self.state[name] != "working" or name in self.terminal for name in self.names), f"{stop} decided while an agent works: {self.trace}"
+            assert (stop == "failed") == everyone_out, f"stop reason {stop} but terminals are {self.terminal}: {self.trace}"
+        if stop == "max_tokens":
+            assert self.events[index - 1].kind.value == MODEL_CALLED, f"max_tokens not decided in the model_called block: {self.trace}"
+        if stop == "timeout":
+            assert set(self.terminal) == set(self.names), f"timeout decided before every agent ended: {self.trace}"
+        # INV-12: the same block marks every still-queued message undelivered, in member order.
+        expected = [(UNDELIVERED, name, mid) for name in self.names for mid in self.pending[name]]
+        assert self.next_ids(index, len(expected)) == expected, f"swarm_stopping did not mark the queued messages undelivered: {self.trace}"
+        self.undelivered_at_stop = [mid for _, _, mid in expected]
+
+    def observation(self, event: Any) -> None:
+        kind, agent = event.kind.value, event.agent
+        base = self.last_base.get(agent)
+        if kind == TOOL_CALLED:
+            assert event.tool_name.strip() and event.tool_status is not None, f"tool_called without name or status: {event!r}"
+        elif kind == REFUSED:
+            assert event.text.strip(), f"message_refused without a reason: {event!r}"
+        elif kind == MODEL_CALLED:
+            assert event.model_calls >= max(1, self.model_calls.get(agent, 0)), f"model_calls went down for {agent}: {self.trace}"
+            self.model_calls[agent] = event.model_calls
+        elif kind == MODEL_ERROR:
+            assert ": " in event.text, f"model_error text is not '<Type>: <message>': {event!r}"
+        elif kind == COMPACTION:
+            assert base is not None and base.kind.value == MODEL_CALLED and event.compaction_trigger is not None, f"compaction #{event.sequence} without its side call: {self.trace}"
+        elif kind in _DERIVED:
+            # INV-25..27: a derived event follows its agent's own tool_called for the matching tool.
+            assert base is not None and base.kind.value == TOOL_CALLED, f"{kind} #{event.sequence} without its tool_called: {self.trace}"
+            self.derived(event, base)
+
+    def derived(self, event: Any, base: Any) -> None:
+        kind, agent = event.kind.value, event.agent
+        if kind == TRUNCATED:
+            assert event.tool_name == base.tool_name and event.omitted_chars > 0, f"bad tool_result_truncated {event!r}"
+        elif kind == COMMAND_FAILED:
+            assert base.tool_name == "bash" and _COMMAND_FAILED_TEXT.fullmatch(event.text), f"bad command_failed {event!r}"
+        else:
+            assert base.tool_name in ("write_text", "patch_file") and base.tool_status.value == "success", f"file_changed after {base!r}"
+            assert Path(event.path).is_absolute(), f"file_changed path is not absolute: {event!r}"
+            previous = self.writers.get(event.path, "")
+            assert event.peer == (previous if previous != agent else ""), f"file_changed #{event.sequence} names peer {event.peer!r}, previous writer {previous!r}"
+            self.writers[event.path] = agent
 
 
 def assert_event_invariants(result: Any, names: Sequence[str], *, max_turns: int, log: EventLog | None = None, error_types: Sequence[str] = ()) -> None:
-    """Replays result.events as the spec's state machine and checks every invariant the record can show (spec 6.1, 9.1, NFR-1)."""
+    """Replays result.events as the spec's state machine and checks every invariant the record can show (spec 6.1, 8.5, 9.1)."""
     events = list(result.events)
     stop = result.stop_reason.value
     trace = describe(events)
 
-    # INV-13: numbered 1..N, one SWARM_ENDED, last, carrying the result's stop reason.
+    # INV-16: numbered 1..N; one swarm_stopping before the one last swarm_ended, both carrying the result's stop reason.
     assert [event.sequence for event in events] == list(range(1, len(events) + 1)), f"sequences are not 1..N: {trace}"
-    ended = of_kind(events, ENDED)
-    assert len(ended) == 1 and events[-1].kind.value == ENDED, f"SWARM_ENDED is not the one last event: {trace}"
-    assert ended[0].agent == "" and ended[0].stop_reason is result.stop_reason, f"SWARM_ENDED {ended[0]!r} does not match {result.stop_reason!r}"
-    # Section 4 and the run pseudocode: one AGENT_STARTED per member, in member order, before anything else.
-    assert [(event.kind.value, event.agent) for event in events[: len(names)]] == [(STARTED, name) for name in names], f"runs do not start in member order: {trace}"
+    ended, stopping = of_kind(events, ENDED), of_kind(events, STOPPING)
+    assert len(ended) == 1 and events[-1].kind.value == ENDED, f"swarm_ended is not the one last event: {trace}"
+    assert len(stopping) == 1 and stopping[0].sequence < ended[0].sequence, f"not exactly one swarm_stopping before swarm_ended: {trace}"
+    assert ended[0].stop_reason is result.stop_reason and stopping[0].stop_reason is result.stop_reason, f"stop reasons differ from {result.stop_reason!r}: {trace}"
+    # INV-17, INV-28: workplace_prepared, then agent_created per member, then agent_started per member.
+    assert pairs(events[: 1 + 2 * len(names)]) == start_pairs(names), f"the run does not start with the workplace and the members in order: {trace}"
+    assert Path(events[0].path).is_absolute() and events[0].folder_state is not None, f"bad workplace_prepared {events[0]!r}"
 
     previous_ms = 0
     for event in events:
-        # Section 9.1: whole milliseconds, never decreasing; unlisted fields keep their defaults.
+        # Section 9.1, INV-21: whole milliseconds, never decreasing; unlisted fields keep their defaults; agent blank only for swarm kinds.
         assert type(event.elapsed_ms) is int and event.elapsed_ms >= previous_ms, f"elapsed_ms not a non-decreasing int at {event!r}"
         previous_ms = event.elapsed_ms
         allowed = _ALLOWED_FIELDS[event.kind.value]
         for name, default in _DEFAULTS.items():
             if name not in allowed:
                 assert getattr(event, name) == default, f"{event.kind.value} #{event.sequence} sets {name}={getattr(event, name)!r}"
-        if event.kind.value != ENDED:
+        if event.kind.value in _SWARM_KINDS:
+            assert event.agent == "", f"{event.kind.value} names agent {event.agent!r}"
+        else:
             assert event.agent in names, f"event for a non-member: {event!r}"
 
-    state: dict[str, str | None] = {name: None for name in names}
-    pending: dict[str, list[int]] = {name: [] for name in names}
-    sent: dict[int, Any] = {}
-    delivered: set[int] = set()
-    last_idle_text: dict[str, str] = {}
-    turns = 0
+    replay = _Replay(events, names, max_turns)
     for index, event in enumerate(events[:-1]):
-        kind, agent = event.kind.value, event.agent
-        # INV-14: STARTED (IDLE WOKE)* [IDLE | FAILED]; work, sends and deliveries happen only while working; nothing after FAILED.
-        if kind == STARTED:
-            assert state[agent] is None, f"{agent} started twice: {trace}"
-            state[agent] = "working"
-            turns += 1
-        elif kind == IDLE:
-            assert state[agent] == "working", f"{agent} went idle while {state[agent]}: {trace}"
-            state[agent] = "idle"
-            last_idle_text[agent] = event.text
-            # INV-7, AC-20: ending a turn with mail waiting and budget left continues at once.
-            if pending[agent] and turns < max_turns:
-                follower = events[index + 1]
-                assert (follower.kind.value, follower.agent) == (WOKE, agent), f"{agent} went idle holding mail {pending[agent]} with turns left: {trace}"
-        elif kind == WOKE:
-            assert state[agent] == "idle", f"{agent} woke while {state[agent]}: {trace}"
-            # INV-9: a wake never passes the turn budget.
-            assert turns < max_turns, f"wake #{turns + 1} passes max_turns={max_turns}: {trace}"
-            state[agent] = "working"
-            turns += 1
-        elif kind == FAILED:
-            assert state[agent] == "working", f"{agent} failed while {state[agent]}: {trace}"
-            assert event.text.strip(), f"AGENT_FAILED for {agent} names no cause"
-            state[agent] = "failed"
-        else:
-            assert state[agent] == "working", f"{kind} for {agent} while {state[agent]}: {trace}"
-        if kind == TOOL_CALLED:
-            assert event.tool_name.strip() and event.tool_status is not None, f"TOOL_CALLED without name or status: {event!r}"
-        if kind == SENT:
-            # Section 9.1, INV-8: a send names another member that has not failed, carries its text, and its id is its own sequence.
-            assert event.message_id == event.sequence, f"MESSAGE_SENT id {event.message_id} != sequence {event.sequence}"
-            assert event.peer in names and event.peer != agent and event.text.strip(), f"bad MESSAGE_SENT {event!r}"
-            assert state[event.peer] != "failed", f"a message to failed {event.peer} was accepted: {trace}"
-            sent[event.sequence] = event
-            pending[event.peer].append(event.sequence)
-            # D-5, INV-7: a message to an idle agent with budget left wakes it in the same step.
-            if state[event.peer] == "idle" and turns < max_turns:
-                follower = events[index + 1]
-                assert (follower.kind.value, follower.agent) == (WOKE, event.peer), f"message {event.sequence} to idle {event.peer} did not wake it: {trace}"
-        if kind == DELIVERED:
-            # INV-5, INV-14: delivered once, to its named recipient, after its send, in acceptance order.
-            source = sent.get(event.message_id)
-            assert source is not None, f"MESSAGE_DELIVERED #{event.sequence} names no earlier MESSAGE_SENT: {trace}"
-            assert (source.agent, source.peer) == (event.peer, agent), f"delivery #{event.sequence} misrouted: {trace}"
-            assert event.message_id not in delivered, f"message {event.message_id} delivered twice: {trace}"
-            assert pending[agent] and pending[agent][0] == event.message_id, f"delivery to {agent} out of acceptance order: {trace}"
-            delivered.add(event.message_id)
-            pending[agent].pop(0)
+        replay.step(index, event, stop)
 
-    running = [name for name in names if state[name] != "failed"]
-    undelivered = {name: pending[name] for name in running if pending[name]}
-    if stop != "timeout":
-        # INV-10, INV-11: the swarm ended because nobody was working; the reason follows from who failed and what is left.
-        assert all(state[name] in ("idle", "failed") for name in names), f"a {stop} swarm ended with an agent still working: {state}"
-        assert (stop == "failed") == (not running), f"stop reason {stop} but failed agents are {[n for n in names if state[n] == 'failed']}"
-        if stop == "quiet":
-            assert not undelivered, f"QUIET with undelivered messages {undelivered}: {trace}"
-        if stop == "max_turns":
-            assert undelivered, f"MAX_TURNS with no undelivered message: {trace}"
-            assert turns == max_turns, f"MAX_TURNS after {turns} of {max_turns} turns: {trace}"
+    # INV-7, INV-14: every message has its one outcome and every agent its one ending.
+    assert set(replay.sent) == replay.resolved, f"messages without an outcome {sorted(set(replay.sent) - replay.resolved)}: {trace}"
+    assert set(replay.terminal) == set(names), f"agents without a terminal event {sorted(set(names) - set(replay.terminal))}: {trace}"
+    if stop == "quiet":
+        assert not replay.undelivered_at_stop, f"QUIET with undelivered messages {replay.undelivered_at_stop}: {trace}"
+    if stop == "max_turns":
+        # INV-10, EC-5: the budget is spent and every message left at the stop had its one refused wake.
+        assert replay.turns == max_turns and replay.undelivered_at_stop, f"MAX_TURNS after {replay.turns} of {max_turns} turns: {trace}"
+        assert set(replay.undelivered_at_stop) <= replay.wake_refused, f"MAX_TURNS left messages whose wake was never refused: {trace}"
+    if stop == "timeout":
+        assert not of_kind(events, RELEASED), f"TIMEOUT released an agent: {trace}"
+
+    # INV-14: replies are the released agents' replies in member order; on QUIET and MAX_TURNS each is the agent's last turn.
+    released = [name for name in names if replay.terminal[name] == RELEASED]
+    assert [item.sender for item in result.replies] == released, f"replies {result.replies!r} are not the released agents {released}"
     if stop in ("quiet", "max_turns"):
-        # FR-15: each released agent's last reply, in member order.
-        assert [(item.sender, item.content) for item in result.replies] == [(name, last_idle_text[name]) for name in running], f"replies {result.replies!r} are not each running agent's last turn"
-    else:
-        assert tuple(result.replies) == (), f"{stop} must return no replies, got {result.replies!r}"
+        assert [item.content for item in result.replies] == [replay.last_idle_text[name] for name in released], f"replies {result.replies!r} are not each released agent's last turn"
     assert tuple(result.event_error_types) == tuple(error_types), f"unexpected callback errors {result.event_error_types!r}"
 
     if log is not None:
-        # INV-15: never two callbacks at once; every event exactly once in order, or a cut prefix plus SWARM_ENDED on TIMEOUT.
+        # INV-20: never two callbacks at once; every event exactly once in order, or a cut prefix plus swarm_ended on TIMEOUT.
         assert log.max_active <= 1, f"on_event ran {log.max_active} times at once"
         if stop != "timeout":
             assert log.received == events, f"on_event saw {describe(log.received)}, the result holds {trace}"
