@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "731f094c6b23932937d7dc969b6f6c25c0b4d705", "generator": "scripts/generate-sdk-public-api.py"},
+  "source": {"repository": "cerredz/Vidbyte-SDK", "commit": "654deee6d2893e83f67164bd331e0f92c941cd85", "generator": "scripts/generate-sdk-public-api.py"},
   "distribution": "vidbyte-sdk",
   "version": "0.4.0",
   "exports": [
@@ -162,6 +162,8 @@
     "DebateStageSettings",
     "DebugTracer",
     "DecisionChallengeContextItem",
+    "DecisionModelConfig",
+    "DecisionModelMode",
     "DeclareOutputSchemaTool",
     "DefenderReportPayload",
     "DefensePosition",
@@ -495,6 +497,7 @@
     "ProsecutorReportPayload",
     "ProviderUsage",
     "RaiseRecovery",
+    "ReasoningEffort",
     "ReasoningTraceContextItem",
     "RecordModelCallFailureInput",
     "RecordModelCallInput",
