@@ -113,19 +113,21 @@ class AgentSwarmMemberRuntime(AgentRuntime):
     def _measured_context(self, messages: Sequence[Mapping[str, Any]]) -> int:
         # The prompt size the provider last reported for this agent, or
         # the four-characters-per-token estimate when it reported none.
+        # The estimate counts each whole message, because a tool call's
+        # arguments and Gemini's parts are sent too but are not content.
         reported = self.swarm_runtime.last_prompt_tokens(self.agent_name)
         if reported is not None:
             return reported
-        return sum(TokenEstimate.count(str(message.get("content") or "")) for message in messages)
+        return sum(TokenEstimate.count(str(message)) for message in messages)
 
     def _keep_last(self, messages: Sequence[Mapping[str, Any]]) -> int:
         # Count the newest messages whose estimate fits the target, at
         # least one; the strategy rounds the count up to whole tool-call
-        # groups itself.
+        # groups itself. Each whole message is counted, as above.
         target = self.config.compaction_target_tokens or 0
         kept, used = 0, 0
         for message in reversed(messages):
-            used += TokenEstimate.count(str(message.get("content") or ""))
+            used += TokenEstimate.count(str(message))
             if used > target:
                 break
             kept += 1
