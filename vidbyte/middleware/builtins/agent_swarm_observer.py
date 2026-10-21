@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_HISTORY_MAX_TOKENS
+from vidbyte.lib.constants.agent_swarm import (
+    AGENT_SWARM_HISTORY_MAX_TOKENS,
+    AGENT_SWARM_STOPPING_REASON,
+)
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.middleware.compaction.base import CompactionMode
@@ -25,10 +28,6 @@ from vidbyte.middleware.compaction.context_compaction import (
 
 if TYPE_CHECKING:
     from vidbyte.agents.agent_swarm.runtime import AgentSwarmRuntime
-
-# The abort reason every member's loop returns with once the swarm has
-# decided to stop.
-_STOPPING_REASON = "agent_swarm_stopping"
 
 
 class AgentSwarmObserverMiddleware(AgentMiddleware):
@@ -43,7 +42,7 @@ class AgentSwarmObserverMiddleware(AgentMiddleware):
         # Once the swarm has decided to stop, every further model call of
         # every member is refused here, before anything is sent.
         if self.swarm_runtime.stopping:
-            return MiddlewareDecision.abort(_STOPPING_REASON)
+            return MiddlewareDecision.abort(AGENT_SWARM_STOPPING_REASON)
         return MiddlewareDecision.continue_()
 
     async def after_model_response(self, ctx: MiddlewareContext) -> MiddlewareDecision:
@@ -54,7 +53,7 @@ class AgentSwarmObserverMiddleware(AgentMiddleware):
         # Then stop this member at once when the swarm is stopping, so it
         # neither runs the response's tools nor calls the model again.
         if self.swarm_runtime.stopping:
-            return MiddlewareDecision.abort(_STOPPING_REASON)
+            return MiddlewareDecision.abort(AGENT_SWARM_STOPPING_REASON)
         return MiddlewareDecision.continue_()
 
     async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:

@@ -24,7 +24,12 @@ from vidbyte.agents.agent_swarm.member import (
     AgentSwarmMemberAgent,
     AgentSwarmMessageTool,
 )
-from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_TOOL_RESULT_MAX_CHARS
+from vidbyte.lib.constants.agent_swarm import (
+    AGENT_SWARM_FILE_TOOL_PATH_ARGUMENTS,
+    AGENT_SWARM_SHELL_TIME_LIMIT_ERROR,
+    AGENT_SWARM_SHELL_TOOL_NAME,
+    AGENT_SWARM_TOOL_RESULT_MAX_CHARS,
+)
 from vidbyte.lib.dataclasses.agent_swarm import (
     AgentSwarmEvent,
     AgentSwarmMember,
@@ -51,10 +56,6 @@ from vidbyte.tools.toolsets.agent_swarm import AgentSwarmTools
 # The shared system prompt's sections in order (web search only when a search tool is selected), and the other catalog texts a run reads.
 _SECTIONS = (Prompt.AGENT_SWARM_SYSTEM_ENVIRONMENT, Prompt.AGENT_SWARM_SYSTEM_TOOLS, Prompt.AGENT_SWARM_SYSTEM_WEB_SEARCH, Prompt.AGENT_SWARM_SYSTEM_MESSAGING, Prompt.AGENT_SWARM_SYSTEM_TURNS, Prompt.AGENT_SWARM_SYSTEM_GOAL, Prompt.AGENT_SWARM_SYSTEM_INSTRUCTIONS, Prompt.AGENT_SWARM_SYSTEM_OBJECTIVE, Prompt.AGENT_SWARM_SYSTEM_THOROUGHNESS)
 _REPLIES = (Prompt.AGENT_SWARM_MESSAGE_SENT, Prompt.AGENT_SWARM_MESSAGE_UNKNOWN_RECIPIENT, Prompt.AGENT_SWARM_MESSAGE_STOPPED_RECIPIENT, Prompt.AGENT_SWARM_MESSAGE_BLANK_TEXT, Prompt.AGENT_SWARM_INBOX, Prompt.AGENT_SWARM_INBOX_MESSAGE, Prompt.AGENT_SWARM_COMPACT_REQUESTED)
-# The workplace tools whose successful call changes the file named by this argument, the shell tool whose exit is watched, and bash's own marker for a command stopped at its time limit.
-_FILE_TOOLS = {"write_text": "path", "patch_file": "file_path"}
-_SHELL_TOOL = "bash"
-_TIMEOUT = "timeout"
 
 
 class AgentSwarmRuntime:
@@ -259,7 +260,7 @@ class AgentSwarmRuntime:
         if omitted > 0:
             self._events.record(AgentSwarmEventKind.TOOL_RESULT_TRUNCATED, name, tool_name=call.tool_name, omitted_chars=omitted)
         # A successful write_text or patch_file names the file's absolute path, and the previous writer when another agent wrote it last.
-        argument = _FILE_TOOLS.get(call.tool_name)
+        argument = AGENT_SWARM_FILE_TOOL_PATH_ARGUMENTS.get(call.tool_name)
         raw = call.arguments.get(argument) if argument is not None else None
         if result.status is ToolStatus.SUCCESS and isinstance(raw, str) and raw.strip():
             path = str((self._root / raw).resolve())
@@ -268,9 +269,9 @@ class AgentSwarmRuntime:
             self._last_writer[path] = name
         # A bash command stopped at its time limit, or one that exited non-zero.
         exit_code = result.metadata.get("exit_code")
-        if call.tool_name == _SHELL_TOOL and result.metadata.get("error") == _TIMEOUT:
-            self._events.record(AgentSwarmEventKind.COMMAND_FAILED, name, text=_TIMEOUT)
-        elif call.tool_name == _SHELL_TOOL and type(exit_code) is int and exit_code:
+        if call.tool_name == AGENT_SWARM_SHELL_TOOL_NAME and result.metadata.get("error") == AGENT_SWARM_SHELL_TIME_LIMIT_ERROR:
+            self._events.record(AgentSwarmEventKind.COMMAND_FAILED, name, text=AGENT_SWARM_SHELL_TIME_LIMIT_ERROR)
+        elif call.tool_name == AGENT_SWARM_SHELL_TOOL_NAME and type(exit_code) is int and exit_code:
             self._events.record(AgentSwarmEventKind.COMMAND_FAILED, name, text=f"exit code {exit_code}")
         await self._events.flush()
 
