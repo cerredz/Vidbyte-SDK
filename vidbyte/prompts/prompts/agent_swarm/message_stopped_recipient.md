@@ -1,1 +1,1 @@
-No message was sent: {recipient} has stopped and cannot receive messages.
+Message recorded for {recipient}, but {recipient} has stopped and will not receive it.
