@@ -1592,7 +1592,7 @@ These are S3 choices where the spec was silent or named only a lower-level shape
   - `ComposeGit` is an instance class with `has_commit(required=)`.
   - `DiffCapture` takes no keys.
   - The plan decoder is keyed by `ComposeField.ROLES`.
-- **Git failures.** A git timeout during a worktree command is `WORKTREE_FAILED`, and a failure to launch git is `GIT_UNAVAILABLE`. Removing a temporary index folder ignores errors.
+- **Git failures.** A git timeout during a worktree command is `WORKTREE_FAILED`, and a failure to launch git is `GIT_UNAVAILABLE`. Removing a temporary index folder ignores errors. A folder that cannot be made or deleted raises its `ThreadComposeError` after the `OSError` handler with only the error's type, so the error chains no OS text, which can name a file a step named after a key (S5 re-review round 2, R-34).
 - **Verdicts.** `ThreadVerdict.findings` items may be blank.
 - **Fan-out.** As D-17 says from r5: `ComposeCalls.fan_out` waits with `asyncio.wait(FIRST_EXCEPTION)`, cancels what still runs and waits for every child with `ComposeCalls.settle`, so exactly one exception propagates; there is no gather. The planner and the selector run as one-child fan-outs, so a repeated cancel also waits for their cleanup (S4 review R-10).
 - **Problem texts.**
