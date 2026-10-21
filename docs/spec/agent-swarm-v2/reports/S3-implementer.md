@@ -1,8 +1,12 @@
-# S3 implementer report: agent-swarm-v2 (BLOCKED on three S2 test defects)
+# S3 implementer report: agent-swarm-v2
 
 Worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm-v2`, branch `feat/agent-swarm`, started at `739ac499` (product code identical to `39ce8b20`). Drift check passed at the start: `git log HEAD..origin/feat/agent-swarm` empty; `git diff --stat 39ce8b20..HEAD -- vidbyte contracts REPO_MAP.md scripts lint` empty.
 
-**Status: BLOCKED at Phase 5 gate 1.** Phases 1-4 are done, and every other Phase 5 gate was run (see Gates). Every §12.3 row an implementer owns (1-46) is implemented and committed. 262 of the 273 cases in `tests/features/agent_swarm` plus `tests/test_prompts_interface.py` pass. The 11 that fail are caused by three defects in the S2 tests (D1-D3 below), which the briefing forbids me to edit. With the three one-line corrections applied in memory only (never committed), 267 of the 268 pack cases pass. The last case is the scheduling-dependent EC-6 test, and a copy of it whose side step waits for tester passes. Per the briefing, nothing was pushed, no CI was dispatched, and the spec front matter and §6.2 Proofs are unchanged.
+**Status: DONE.**
+- Every §12.3 row an implementer owns (1-46) is implemented and committed.
+- The run first stopped at Phase 5 gate 1 on three S2 test defects (D1-D3 below). The orchestrator verified them, and S2 fixed exactly those three in `1ddc6b9d` with no product change.
+- S3 then resumed at Phase 5. Every local gate is now green, and the swarm pack passes 268/268.
+- The branch was pushed as a fast-forward (`39ce8b20..582c414d`), and CI and Static policy were dispatched on `582c414d`.
 
 ## Commits (on top of `739ac499`, oldest first)
 
@@ -19,6 +23,12 @@ Worktree `C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm-v2`, br
 | `a319f44d` | 40 | feat(agent-swarm): export AgentSwarmWebSearch from the root package [W-9; FR-11, AC-19] |
 | `649a7880` | 41 | chore(contracts): regenerate the SDK public-API contract for AgentSwarmWebSearch [W-9; FR-11, AC-19] |
 | `ce988064` | 42-46 | docs(agent-swarm): describe the shared prompt, compaction, web search and budget stop in the folder READMEs and repo map [W-9; FR-18, AC-21, AC-25] |
+| `18565c17` | — | docs(spec): record the S3 implementer report for agent-swarm-v2, blocked on three S2 test defects [W-9; FR-18] |
+| `1ddc6b9d` (S2) | — | test(agent-swarm): fix three oracle and fixture defects found at S3 [EC-6, INV-1, INV-35] |
+| `7e311815`, `582c414d` (S2, orchestrator) | — | the S2 follow-up report and the pipeline state |
+| `81ee53bf` | 47 | docs(spec): record implementation for agent-swarm-v2 (front matter `status: implemented`) |
+| `5e5a74a0` | 47 | docs(spec): record implementation proof for agent-swarm-v2 (the AC-25 Proof, the §17 r3 S3 row, and the deviations list) |
+| (this commit) | — | docs(spec): record the final S3 implementer report for agent-swarm-v2 |
 
 P3 is one commit (`20dbbcd9`), as the briefing requires: it deletes `vidbyte/agents/agent_swarm/settings.py` and `system_prompt.md`, removes `Prompt.AGENT_SWARM_SYSTEM_PROMPT`, its index entry, `AGENT_SWARM_RESERVED_TOOL_NAMES`, and `AgentSwarmMember.system_prompt`, and adds the result's `swarm_stopping` check, all together with their last readers and first writer (`runtime.py`, `swarm.py`, `__init__.py`).
 
@@ -51,7 +61,7 @@ P3 is one commit (`20dbbcd9`), as the briefing requires: it deletes `vidbyte/age
 | 40 | done | `a319f44d` |
 | 41 | done (generated, never hand-edited; `--check` passes) | `649a7880` |
 | 42-46 | done | `ce988064` |
-| 47 | not done: front matter `status: implemented`, §6.2 Proofs, and §17 row wait for green gates and CI | — |
+| 47 | done: front matter `status: implemented` (and `updated: 2026-10-21`); the AC-25 Proof cell filled with the gate output and run IDs (every other AC's Proof is a test); the §17 `r3 | 2026-10-21 | S3 implement` row; and the "Implementation deviations (S3)" list with the D1-D3 note | `81ee53bf`, `5e5a74a0` |
 
 ## Deviations from the spec
 
@@ -75,9 +85,9 @@ No file outside §12.3 was changed. `git diff --name-status 739ac499..HEAD` list
 - Settings fields: 3 added (`web_search`, `web_search_api_key`, `max_tokens`) and 2 removed (`search_tool`, `AgentSwarmMember.system_prompt`).
 - Module sizes after the header: `runtime.py` 398, `member.py` 230, `compaction.py` 79, `agent_swarm_observer.py` 90, `lib/dataclasses/agent_swarm.py` 318, `toolsets/agent_swarm.py` 73. Package README: 12,253 bytes. `vidbyte/agents/README.md`: 33,476. `vidbyte/prompts/README.md`: 33,831 (A009 ≤ 40,000).
 
-## Blockers: three S2 test defects
+## Resolved blockers: three S2 test defects (fixed by S2 in `1ddc6b9d`)
 
-The briefing forbids editing tests, so each defect is reported here with its test, the spec ID, the evidence, and a one-line fix.
+The briefing forbids editing tests, so S3 reported each defect with its test, the spec ID, the evidence, and a one-line fix. The orchestrator verified all three, and S2 applied exactly these fixes in `1ddc6b9d` (4 test files, 10 insertions and 5 deletions). The record below is kept for review.
 
 ### D1: the replay oracle compares a `compaction` event with itself
 
@@ -134,23 +144,39 @@ The briefing forbids editing tests, so each defect is reported here with its tes
 
 A probe plugin applies the exact D1 line above and the D2 label correction in memory. It recompiles the fixtures module with that one line changed, and it was never committed (`scratchpad/probe_plugin/swarm_oracle_probe_exact.py`). With it, `PYTHONPATH="$(pwd);<scratchpad>/probe_plugin" python -m pytest tests/features/agent_swarm -q -p swarm_oracle_probe_exact` gives `1 failed, 267 passed in 6.78s`. The one failure is D3 (`scripted steps never used (agent -> steps left): {'tester': 1}`). The D3 copy (`scratchpad/probe_plugin/test_probe_budget_side_call.py`) passes with the same plugin: `1 passed`. All the corrections are test-only, and no product change is needed.
 
-## Gates (final lines at `ce988064`)
+## Gates
+
+### Local, Phase 5, at `582c414d` (S2's fixes included)
 
 | Gate | Command | Final line |
 |---|---|---|
-| 1. Swarm pack | `PYTHONPATH="$(pwd)" python -m pytest tests/features/agent_swarm -q` | `11 failed, 257 passed in 9.10s` (the 11 are exactly D1-D3) |
-| 2. Touched suites | `PYTHONPATH="$(pwd)" python -m pytest tests -q -k "agent_swarm or prompts or compaction or toolset or public_api"` | `11 failed, 494 passed, 6025 deselected in 12.12s` (the same 11) |
+| 1. Swarm pack | `PYTHONPATH="$(pwd)" python -m pytest tests/features/agent_swarm -q` | `268 passed in 7.19s` |
+| 2. Touched suites | `PYTHONPATH="$(pwd)" python -m pytest tests -q -k "agent_swarm or prompts or compaction or toolset or public_api"` | `505 passed, 6025 deselected in 9.54s` |
+| 2a. Code-map suites | `PYTHONPATH="$(pwd)" python -m pytest tests/test_prompts_interface.py tests/test_context_compaction_middleware.py -q` | `39 passed in 1.01s` |
 | 3. Lint | `PYTHONPATH="$(pwd)" python lint/run.py` | `SDK-LINT: PASS` |
 | 3a. Import order | `python -m ruff check <the branch's changed .py files> --config lint/ruff.toml --select I001 --no-cache` | `All checks passed!` (whole tree: 223 findings, all in untouched files such as `vidbyte/tools/toolsets/paradigm_minimal.py`) |
 | 4. Public-API contract | `python scripts/generate-sdk-public-api.py --check` | `contracts/sdk-public-api.json is current at a319f44dfec4d2577e0707767bad87bbb7063fa8 (vidbyte-sdk 0.3.0, 650 exports).` |
-| 5a. Source stage | `PYTHONPATH="$(pwd)" python scripts/run_ci.py --stage source` | `14 failed, 6500 passed, 16 skipped in 102.83s` / `CI failed: Command failed with exit code 1: ... python.exe -m pytest` (the 11 D1-D3 cases plus the 3 inherited harness_threads cases; lint inside the stage: `SDK-LINT: PASS`) |
+| 5a. Source stage | `PYTHONPATH="$(pwd)" python scripts/run_ci.py --stage source` | `3 failed, 6511 passed, 16 skipped in 108.67s` (only the three inherited harness_threads cases below; lint inside the stage: `SDK-LINT: PASS`) |
 | 5b. Package stage | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `Installed vidbyte-sdk 0.3.0 passed smoke checks.` / `CI passed.` |
 | 6a. Semgrep rule tests | `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py` | `1/1: ✓ All tests passed` |
-| 6b. Semgrep scan | `semgrep scan --error --metrics=off --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (after `git add -A`) | `Ran 1 rule on 996 files: 0 findings.` (exit 0) |
+| 6b. Semgrep scan | `semgrep scan --error --metrics=off --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` (after `git add -A` on a clean tree) | `Ran 1 rule on 996 files: 0 findings.` (exit 0) |
+
+At `ce988064`, before S2's fixes, the same gates gave:
+- the pack: `11 failed, 257 passed`, and those 11 were exactly D1-D3;
+- the source stage: `14 failed, 6500 passed`.
+Every other line matched the table.
 
 Semgrep 1.170.1 ran from the scratch venv. The venv's `semgrep.exe` starts `pysemgrep` through `PATH`, and a global `pysemgrep` with an mcp 2.x dependency shadowed the venv's copy (`ModuleNotFoundError: No module named 'mcp.server.fastmcp'`). The fix was to put the venv's `Scripts` folder first on `PATH` for the call, in MSYS form (`/c/Users/...`), because a `C:/` entry breaks Git Bash's `PATH`. Nothing was installed globally. `PYTHONPATH="$(pwd)" python -c "import vidbyte,inspect;print(inspect.getfile(vidbyte))"` prints the worktree's `vidbyte\__init__.py`.
 
-**Not run, per the briefing ("Do not push while any required local gate fails"):** Phase 6 (push, CI and Static policy dispatch) and Phase 7 (spec `status: implemented`, §6.2 Proofs, §17 row, deviations list in the spec). `origin/feat/agent-swarm` is still `39ce8b20`.
+### Remote, Phase 6, on `582c414d`
+
+- `git push origin feat/agent-swarm`: `39ce8b20..582c414d  feat/agent-swarm -> feat/agent-swarm` (fast-forward; `git merge-base --is-ancestor origin/feat/agent-swarm HEAD` was checked first).
+- `gh pr view 1174 --json headRefOid,isDraft`: `582c414d8d8bc0f8c04aecd7f79847b6665db830 draft=true`.
+
+- `gh workflow run CI --ref feat/agent-swarm`: run [39549674849](https://github.com/cerredz/Vidbyte-SDK/actions/runs/39549674849), head `582c414d`, conclusion `success` (`Source / Python 3.11: success`, `Source / Python 3.12: success`, `Package: success`). No MCP-timeout flake occurred, so nothing was rerun.
+- `gh workflow run "Static policy" --ref feat/agent-swarm`: run [39549676688](https://github.com/cerredz/Vidbyte-SDK/actions/runs/39549676688), head `582c414d`, `gh run watch --exit-status` exit 0, `conclusion=success` (`Static policy: success`).
+- The background `gh run watch` for the CI run was stopped by Claude Code under system memory pressure. It was not restarted. A single `gh run view 39549674849` afterwards read `status=completed conclusion=success head=582c414d`.
+- The docs-only commits pushed after these runs (`81ee53bf` front matter, `5e5a74a0` spec proof, and this report) change nothing under `vidbyte/`, `tests/`, `contracts/`, or `lint/`.
 
 ## Inherited failures (not caused by this branch)
 
@@ -175,10 +201,10 @@ All three are in `tests/features/harness_threads/test_harness_threads_surface.py
 
 ## Phase 4 completeness pass
 
-- **§12.3:** rows 1-46 are done (see Rows). Row 47 waits for Phase 6 and 7.
+- **§12.3:** rows 1-47 are done (see Rows).
 - **§12.4, checked mechanically:**
   - `git diff --stat 39ce8b20 -- vidbyte/agents/runtime.py vidbyte/agents/base.py vidbyte/lib/dataclasses/validation.py` is empty.
-  - `git diff --stat 739ac499..HEAD -- tests` is empty (no test edited).
+  - S3 edited no test. The only test change on the branch since S2's pack is S2's own `1ddc6b9d` (D1-D3).
   - Every touched swarm module's RELATED DOCS names `docs/spec/agent-swarm-v2/spec.md`.
   - The `vidbyte/lib/enums/prompts.py` header reads "162 static prompt assets across 36".
   - `api_keys` and `web_search_api_key` are `repr=False`.
@@ -203,10 +229,14 @@ All three are in `tests/features/harness_threads/test_harness_threads_surface.py
   - S020 needs new files git-added before the File Index parity check, and it flags a File Index line that names a path outside the folder (the `__init__.py` entry now says "a lib record, re-exported here").
 - **`AgentSwarmResult` now checks for exactly one `swarm_stopping`.** It had to land in the same commit as the first code that records it, or every run of the old runtime would have raised at its result.
 
-## Next step
+## What this opens
 
-S2 applies D1-D3 (three test-only edits; no product change is needed). S3 then resumes at the gates:
-1. Run lint, the API check, `run_ci` source and package, and semgrep.
-2. Fast-forward push `feat/agent-swarm`.
-3. Dispatch CI and Static policy.
-4. Record front matter `status: implemented`, the §6.2 Proofs, the §17 row, and these deviations in the spec.
+- **S4/S5 review.** Start with:
+  - `runtime.py`'s await-free blocks and the cancel branch;
+  - `_after_tool_iteration` (compaction before mail; the side call counted once);
+  - deviation 5 (the provider passed to `arun`).
+- **S6 (not S3).** S6 owns these PR actions:
+  - resolve the four review threads with the commit SHAs §12.5 names;
+  - rewrite PR #1174's title and body from the spec;
+  - record runs 39549674849 and 39549676688 in the body.
+- **Follow-up outside §12.3.** A live smoke run of the §4 snippet against real providers would test the provider-label path (deviation 5) and real model compaction, beyond the scripted runner. It is not a gate here.
