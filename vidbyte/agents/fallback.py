@@ -8,7 +8,8 @@ Purpose:
     transient provider failure degrades to the next model instead of ending the run.
 Architecture:
     - AgentFallback: Immutable chain plus advance/transform policy helpers; every
-      backup runner gets the agent's matched ProviderKeys and text-model mode.
+      backup runner gets the agent's matched ProviderKeys, text-model mode and
+      reasoning effort.
     - DEFAULT_FALLBACK_ERRORS: Provider-level exceptions that justify a switch.
 Relations:
     Built by vidbyte.agents.base via AgentFallback.from_spec. Consumed by

@@ -3,9 +3,9 @@
 Description:
     Model execution configuration dataclasses for text, image, and video models.
 Purpose:
-    Stores model configurations and delegates API key and endpoint validation and resolution to ProviderModelRegistry.
+    Stores model configurations and delegates API key and endpoint validation and resolution to ProviderModelRegistry, and reasoning-effort checks to ReasoningEffortRegistry.
 Architecture:
-    - TextModelConfig: dataclass for text/chat completions; matches its api_keys list to its provider at construction.
+    - TextModelConfig: dataclass for text/chat completions; matches its api_keys list to its provider and checks its reasoning effort against its mode and model at construction.
     - TextCredentials: the keys one text call sends, resolved for its mode.
     - ImageModelConfig: dataclass for image generation.
     - VideoModelConfig: dataclass for video generation tasks.

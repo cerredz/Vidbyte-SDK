@@ -6,7 +6,7 @@ Purpose:
     Exposes stable data structures like AgentCard and AgentMessage for registry and execution systems.
 Architecture:
     - ProviderKeys: The matched provider keys and Vidbyte key that an agent's children carry.
-    - AgentRunnerConfig: Primitive backend configuration, with the matched keys and the text-model mode.
+    - AgentRunnerConfig: Primitive backend configuration, with the matched keys, the text-model mode and the reasoning effort.
     - PauseDuration: Validated whole-number delay for BaseAgent.pause().
     - AllowedToolNames: Validated, stripped tool names for the AgentLoopSettings.allowed_tools gate.
     - FallbackModel: One entry in an ordered agent fallback chain.
