@@ -165,7 +165,7 @@ Each line is *input + state → wrong output if unguarded*, with the test that c
 - The budget stop lets another member make one more paid call, leaves a parked agent waiting, or records the stop late (`test_crossing_the_token_budget_stops_the_swarm_in_the_same_block_and_refuses_every_later_call`, `test_the_first_response_crossing_the_budget_refuses_every_other_first_call`).
 - A member in the middle of a long tool call when the stop is decided makes another model call, or is cancelled instead of released (`test_a_member_inside_a_long_tool_call_finishes_it_and_is_released_without_another_model_call`).
 - A send whose response was in flight when the stop was decided is lost or delivered (`test_a_send_after_the_stop_is_decided_is_sent_then_undelivered_with_the_stopped_reply`).
-- A model error the loop retries is not recorded, or the observer's hook changes the retry decision (`test_a_retried_model_error_is_recorded_before_the_retry_and_the_agent_keeps_working`).
+- A model error that a retry middleware retries is not recorded, or the observer's hook changes the retry decision; AgentSwarm installs no retry, so the test appends one (`test_a_retried_model_error_records_model_error_and_the_agent_keeps_working`).
 - A provider that reports no usage crashes the observer or trips the budget (`test_missing_usage_records_zeros_and_never_trips_the_budget`).
 - The time limit leaves an agent with no ending, fails it, or labels a parked agent as working (`test_the_time_limit_cancels_every_agent_and_returns_timeout`, `test_the_time_limit_labels_working_and_idle_agents_and_fails_none`).
 - A recording bug fails the agent instead of exiting it, or leaves its inbox unresolved (`test_a_turn_middleware_recording_bug_exits_only_that_agent_naming_the_middleware_abort`).
@@ -237,7 +237,7 @@ Run: `PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm -q` from the
 - **Seeded property tests** (`random.Random(seed)`, no `hypothesis` dependency) over two to four agents, reconciled against the oracle and every agent's transcript.
 - **Hang guards everywhere.** `run_swarm` bounds every `arun`; every `Gate`, `Signal` and blocking fake fails after `GUARD_SECONDS`.
 - **Contract tests** on the static surface: exports, enum values, prompt leaves and their sentence counts, record validation tables, and the module budget.
-- **Two deliberate seams besides the model runner.** The r5 fault injection (`AgentSwarmRuntime.record_tool_call` raising) drives AC-24. A one-shot retry middleware appended to the member's runtime middleware drives AC-10, because the member loop has no retry of its own; it only decides to retry and never touches the swarm.
+- **Two deliberate seams besides the model runner.** The r5 fault injection (`AgentSwarmRuntime.record_tool_call` raising) drives AC-24. A one-shot retry middleware appended to the member's runtime middleware drives AC-10, because neither the member loop nor AgentSwarm installs a retry (spec r4 INV-23: without one, a member's first failed model call fails it); it only decides to retry and never touches the swarm.
 
 ## Omitted Testing Strategies
 

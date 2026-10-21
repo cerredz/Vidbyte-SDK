@@ -547,7 +547,7 @@ class FakeTavily:
 
 
 class RetryModelErrorOnce(AgentMiddleware):
-    """Retries each agent's first failed model attempt at once: the loop's own retry seam, which the member agent does not install (spec AC-10)."""
+    """Retries each agent's first failed model attempt at once, from the member's middleware seam; AgentSwarm installs no retry, so only a test that appends this one retries (spec r4 INV-23, AC-10)."""
 
     def __init__(self, retried: list[str]) -> None:
         self.retried = retried
