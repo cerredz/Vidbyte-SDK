@@ -121,6 +121,9 @@ class Runner:
         config_type = self._config_type_for(runner_type)
         allowed = {field.name for field in fields(config_type)}
         options = dict(self.options)
+        # A set keyword wins; an unset one keeps the options effort.
+        if self.reasoning_effort is not None:
+            options["reasoning_effort"] = self.reasoning_effort
         # @intent non-text-configs-take-their-providers-key
         # A text config takes the whole matched record and the mode, so
         # it resolves its own credentials. Image, video, audio, and
@@ -131,10 +134,9 @@ class Runner:
         if runner_type == RUNNER_TYPE_TEXT:
             options["api_keys"] = self.api_keys
             options["mode"] = self.model_mode
-            options["reasoning_effort"] = self.reasoning_effort
         elif (provider_key := self.api_keys.key_for(self.provider or "")) is not None:
             options["api_key"] = provider_key
-        if self.reasoning_effort is not None and runner_type != RUNNER_TYPE_TEXT:
+        if options.get("reasoning_effort") is not None and runner_type != RUNNER_TYPE_TEXT:
             raise ConfigurationError(
                 f"Runner sets reasoning_effort, but model '{self.model_name}' resolves to a {runner_type} runner, which has no reasoning effort.",
                 details={"provider": self.provider, "model": self.model_name, "runner_type": runner_type},
