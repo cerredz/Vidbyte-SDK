@@ -22,7 +22,7 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
 | S4 adversarial review | done | 2026-10-21 | 2026-10-21 | reports/S4-review-{conformance,conventions,engineering}.md, reports/S4-findings-verifier.md | review.md: MERGEABLE AFTER FIXES; confirmed 3 Blocker (R-1 call chain, R-2 size estimate misses Gemini parts / OpenAI tool_calls, R-3 52 comment lines > 72 cols) + 4 Major (R-4 @intent, R-5 retry wording, R-6 compaction hysteresis, R-7 three surviving mutants); 12 Minor (R-8..R-19, three [scope-adding] follow-ups R-17/R-18/R-19); refuted/downgraded 3 |
 | S5 repair loop | done (3 iterations) | 2026-10-21 | 2026-10-21 | reports/S2-test-amendment.md, reports/S5-repair-1.md, verify-log.md | tests frozen at S2 amendment head 791a8d56 (S2_HEAD for S5): pack 4 failed (R-2 ×2, R-6, R-9, each on its named product defect) / 271 passed, re-run by the orchestrator; lint SDK-LINT: PASS; only removed assertion is the granted `<= 400` line |
 | S5 re-review | done | 2026-10-21 | 2026-10-21 | reports/S5-rereview-1.md, reports/S5-rereview-2.md | round 1: R-1..R-16 CONFIRMED FIXED, 1 Major (R-20) + 2 Minor (R-21, R-22), fixed in iteration 2 (tests + spec r6); round 2: SOUND, 3 Minor (R-23..R-25), fixed in iteration 3 (tests + spec r7); spec status verified |
-| S6 PR | pending | | | | |
+| S6 PR | running | 2026-10-21 | | reports/S6-pr-author.md | |
 
 ## Counters and caps
 - S1 review rounds: 2/2 (round 1: SOUND WITH FIXES, 1 Blocker / 7 Major / 4 Minor, all applied in r2; round 2: SOUND WITH FIXES, 1 Blocker / 3 Major / 3 Minor, author applying in r3; no further review round — anything still disputed becomes a Q-n with a default) · S5 repair iterations: 3/8 (1 product repair, 2 tests-only S2 rounds) · S5 re-review rounds: 2/2 (round 2 SOUND) · 
@@ -71,6 +71,24 @@ This run revises an existing feature branch. `base_commit` is the PR head at the
   - **(1) The R-8 variant is accepted.** The details name the first missing part. The literal both-keys fix would break `test_agent_swarm_contract.py:330`, and a Minor does not justify a test change.
   - **(2) S5 O-1 becomes a stated limitation, not a fix** (SKILL rule 11: a risk the conversation has no control for becomes a limitation or a default-no Q-n). Hysteresis growth is counted in estimate units, so dense CJK-like text peaked at 129,015 measured tokens, against 88,668 before R-6. The 90k trim shares that estimate's blind spot. Recorded as spec A-12 and Q-9, default no.
   - **(3) Spec r5** brings the text in line with the code: `_end_reason` in §5, INV-12, EC-11/13/14, §8.2 and §8.5; the §8.5 `_estimate` and hysteresis state; Q-6..Q-9 for R-17, R-18, R-19 and O-1. No behavior change. Next: one final conformance re-review of 582c414d..HEAD.
+
+- 2026-10-21 — **`origin/main` merged once, after S5, as decided** (`fc89377b`, main at `378c2575`, 15 commits).
+  - **Conflicts.** Five, all both-sides-added, resolved by a script that asserts each hunk's shape:
+    - the root export docstring: main's agent line plus the swarm names, then main's setting-exports line;
+    - the lib enum imports: both blocks;
+    - the toolset imports and `__all__`;
+    - the agents README: main's `InfiniteEvent` paragraph, then the AgentSwarm section (31 insertions vs main, 0 deletions);
+    - the contract, regenerated (0.4.0, 742 exports).
+  - **NG-1 restated against main.** The 30-line `base.py` diff vs main is the PR's own pre-run registration of `AGENT_SWARM_MEMBER` (`845a4d9b..39ce8b20`). This run adds 0 lines.
+  - **One semantic conflict.** Git did not flag it. Main's `tests/features/codex_host/test_codex_host_packaging.py:250` pinned `toolsets.__all__` without `AgentSwarmTools`. Fixed in `9ed61e09` by adding the name to the exact pin. The CodexHostTools order and docstring checks are unchanged, and codex_host gives `215 passed`. This is a merge-resolution edit to main's test, outside the frozen swarm pack.
+  - **Gates on the merge.**
+    - pack + prompt parity: `286 passed`;
+    - lint: `SDK-LINT: PASS`; the JSON findings in merged files are main's own (A001 on `__init__` headers; F401 / root-`__all__` for 4 names absent from `__all__` in both parents);
+    - contract: current;
+    - source stage: `3 failed, 8665 passed`, then 2 after `9ed61e09`; the two `harness_threads` cases are inherited, and the third now passes with main's code;
+    - package: `CI passed.`;
+    - semgrep: `Ran 1 rule on 1047 files: 0 findings.`;
+    - remote on `9ed61e09`: CI 39704722109 success, Static policy 39704724215 success.
 
 - 2026-10-20 16:30 — **No `pip install` of any kind in this worktree.** The machine's global editable `vidbyte-sdk` (0.4.0) resolves to a different worktree, `worktrees/vidbyte-sdk-infinite-memory-events`, and an editable install from here would re-point it under another session. Every stage runs tests and the source gate with `PYTHONPATH=<worktree>` (field guide `local-ci-verification.md`); the orchestrator verified that all 171 swarm tests collect that way and that `inspect.getfile(vidbyte)` prints this worktree. The S2 template's "bootstrap install" step is replaced by that rule in the briefing.
 
