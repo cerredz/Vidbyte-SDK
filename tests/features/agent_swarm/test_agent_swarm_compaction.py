@@ -1,12 +1,12 @@
 """FILE: tests/features/agent_swarm/test_agent_swarm_compaction.py
 
-PURPOSE: Pins per-agent compaction. A compact call, or a measured context at the trigger, rewrites the member's own history at the end of a tool iteration: one summary side call through the member's runner gets the summarizer leaf (with the focus) and a transcript of only the older messages, the live list becomes the summary message plus the kept newest groups, and mail is appended after the summary. One compaction runs per iteration, the last focus wins, a request survives a turn end, nothing older means nothing happens, a blank summary still compacts, a failed summary keeps the history and fails nobody, and a side call can itself reach the token budget. Every size estimate counts whole messages (spec r4 INV-33), so a Gemini member's parts history and an OpenAI history of write calls, whose text sits in tool_calls, compact at the trigger like any other. A repeat automatic compaction waits until the estimate of the history has grown by the target since the last compaction, while a compact request compacts at once (spec r4 INV-32, D-12).
-ROLE IN CODEBASE: Compaction layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md r4 AC-16, AC-17, AC-18; EC-6, EC-21, EC-22, EC-23, EC-24, EC-35; INV-30 to INV-35; D-12; S4 review R-2, R-6, R-7). Exercises AgentSwarmMemberRuntime._after_tool_iteration, AgentSwarmHandoffSummarizer, AgentSwarmCompactTool and AgentSwarmRuntime.request_compaction, take_compaction_request, last_prompt_tokens and record_compaction, over the real ContextCompactionEngine.
+PURPOSE: Pins per-agent compaction. A compact call, or a measured context at the trigger, rewrites the member's own history at the end of a tool iteration: one summary side call through the member's runner gets the summarizer leaf (with the focus) and a transcript of only the older messages, the live list becomes the summary message plus the kept newest groups, and mail is appended after the summary. One compaction runs per iteration, the last focus wins, a request survives a turn end, nothing older means nothing happens, a blank summary still compacts, a failed summary keeps the history and fails nobody, and a side call can itself reach the token budget. Every size estimate counts whole messages (spec r4 INV-33), so a Gemini member's parts history and an OpenAI history of write calls, whose text sits in tool_calls, compact at the trigger like any other. A repeat automatic compaction waits until the estimate of the history has grown by the target since the last compaction, while a compact request compacts at once (spec r4 INV-32, D-12). The same whole-message estimate measures a member whose provider reports no usage and decides that growth, so a Gemini member compacts at the estimated trigger and again after each target of new parts history (S5 re-review R-20).
+ROLE IN CODEBASE: Compaction layer of tests/features/agent_swarm/ (docs/spec/agent-swarm-v2/spec.md r4 AC-16, AC-17, AC-18; EC-6, EC-21, EC-22, EC-23, EC-24, EC-35; INV-30 to INV-35; D-12; S4 review R-2, R-6, R-7; S5 re-review R-20). Exercises AgentSwarmMemberRuntime._after_tool_iteration, AgentSwarmHandoffSummarizer, AgentSwarmCompactTool and AgentSwarmRuntime.request_compaction, take_compaction_request, last_prompt_tokens and record_compaction, over the real ContextCompactionEngine.
 ARCHITECTURE NOTE: The summary side call reaches the same scripted runner as the loop, so it is one more step in the agent's script (spec section 13): a script that is one step short, or one step long, fails assert_complete. Two files of sixty thousand characters make the older history: together they pass AGENT_SWARM_COMPACTION_TARGET_TOKENS by the four-characters-per-token estimate, one of them alone does not, so the newest read is kept and the oldest is summarized. Measured context is scripted through each response's usage.
-FUNCTION INVENTORY: _setup / _run (write the two files; run one scripted swarm and check it with the oracle); _run_unchecked / _check (the same run and check split in two, for a test that asserts its own outcome before the oracle, so a missing compaction fails on that assertion and not on a leftover step); _request_tokens (what a provider would count as one request's prompt, for usage computed from each request); test_a_compact_call_summarizes_only_the_older_history_and_mail_follows_the_summary (AC-16, INV-30, INV-33, INV-34, INV-35); test_a_measured_context_at_the_trigger_compacts_automatically_and_one_below_does_not (AC-17, INV-32); test_a_pending_request_and_the_trigger_in_one_iteration_compact_once (AC-17, INV-31); test_anthropic_context_is_measured_as_all_three_input_buckets (INV-32, EC-35); test_a_gemini_member_at_the_trigger_compacts_its_parts_history_through_one_summary_call (INV-32, INV-33, R-2); test_an_openai_history_of_write_calls_only_compacts_at_the_trigger (INV-32, INV-33, R-2); test_automatic_compaction_waits_for_a_target_of_new_history_and_a_compact_request_does_not (INV-32, D-12, INV-31, R-6); test_the_summary_call_tokens_are_added_to_the_members_tokens_used (INV-35, R-7); test_a_failed_summary_keeps_the_history_delivers_mail_and_fails_nobody (AC-18, INV-35); test_a_compact_request_with_nothing_older_changes_nothing_and_is_consumed (EC-21); test_two_compact_calls_in_one_response_compact_once_with_the_last_focus (EC-22); test_a_request_made_with_isdone_waits_for_the_next_iteration_after_the_wake (EC-23); test_a_blank_summary_still_compacts_to_the_prefix (EC-24); test_a_side_call_that_reaches_the_budget_completes_its_compaction_and_stops_the_swarm (EC-6); test_the_summarizer_prompt_names_the_ten_sections_in_order (INV-34).
+FUNCTION INVENTORY: _setup / _run (write the two files; run one scripted swarm and check it with the oracle); _run_unchecked / _check (the same run and check split in two, for a test that asserts its own outcome before the oracle, so a missing compaction fails on that assertion and not on a leftover step); _request_tokens (what a provider would count as one request's prompt, for usage computed from each request); _write_parts / _gemini_builder / _is_side_call (numbered one-line part files; the build_swarm fields for a Gemini builder; whether a call is the summary side call); test_a_compact_call_summarizes_only_the_older_history_and_mail_follows_the_summary (AC-16, INV-30, INV-33, INV-34, INV-35); test_a_measured_context_at_the_trigger_compacts_automatically_and_one_below_does_not (AC-17, INV-32); test_a_pending_request_and_the_trigger_in_one_iteration_compact_once (AC-17, INV-31); test_anthropic_context_is_measured_as_all_three_input_buckets (INV-32, EC-35); test_a_gemini_member_at_the_trigger_compacts_its_parts_history_through_one_summary_call (INV-32, INV-33, R-2); test_an_openai_history_of_write_calls_only_compacts_at_the_trigger (INV-32, INV-33, R-2); test_automatic_compaction_waits_for_a_target_of_new_history_and_a_compact_request_does_not (INV-32, D-12, INV-31, R-6); test_a_gemini_member_compacts_again_each_time_its_parts_history_grows_by_the_target (INV-32, INV-33, INV-36, R-20); test_a_gemini_member_whose_provider_reports_no_usage_compacts_when_its_estimate_reaches_the_trigger (INV-32, INV-33, EC-8, R-20); test_the_summary_call_tokens_are_added_to_the_members_tokens_used (INV-35, R-7); test_a_failed_summary_keeps_the_history_delivers_mail_and_fails_nobody (AC-18, INV-35); test_a_compact_request_with_nothing_older_changes_nothing_and_is_consumed (EC-21); test_two_compact_calls_in_one_response_compact_once_with_the_last_focus (EC-22); test_a_request_made_with_isdone_waits_for_the_next_iteration_after_the_wake (EC-23); test_a_blank_summary_still_compacts_to_the_prefix (EC-24); test_a_side_call_that_reaches_the_budget_completes_its_compaction_and_stops_the_swarm (EC-6); test_the_summarizer_prompt_names_the_ten_sections_in_order (INV-34).
 COMMON MODIFICATION PATTERNS: A new compaction rule gets one test built on _setup and _run that scripts the side call as a step and compares the next loop call's messages with the previous call's.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not mock ContextCompactionEngine or the summarizer; the real engine decides what is kept. 3. Do not make the files smaller or larger without redoing the size argument above.
-KNOWN EDGE CASES: messages_dropped is the number of summarized messages (the engine's before-minus-after count plus the one summary message added). The side call's model_called carries the loop's model call count at that moment, which equals the preceding loop call's. An Anthropic member's history uses Anthropic message shapes, so its test reads only events and the summary's position. A Gemini member's history is model and user turns of parts with no content key; the engine's summary stays an assistant message with content, which the Gemini provider maps to a model turn. Three sixty-thousand-character writes are the smallest write-only history with something older to summarize, because group rounding keeps the second write's whole group. The hysteresis test's goal alone is over the trigger, so every call meets the trigger and only the growth rule spaces the compactions; its usage is computed from each request, never scripted as a constant.
+KNOWN EDGE CASES: messages_dropped is the number of summarized messages (the engine's before-minus-after count plus the one summary message added). The side call's model_called carries the loop's model call count at that moment, which equals the preceding loop call's. An Anthropic member's history uses Anthropic message shapes, so its test reads only events and the summary's position. A Gemini member's history is model and user turns of parts with no content key; the engine's summary stays an assistant message with content, which the Gemini provider maps to a model turn. Three sixty-thousand-character writes are the smallest write-only history with something older to summarize, because group rounding keeps the second write's whole group. The hysteresis test's goal alone is over the trigger, so every call meets the trigger and only the growth rule spaces the compactions; its usage is computed from each request, never scripted as a constant. A Gemini member whose provider reports no usage records the estimate of the history at the check as its compaction's input_tokens; INV-33 fixes what that estimate counts but not its exact text, so the test computes it with the member's own static _estimate over the history it can see (the last loop call before the check plus the read the compaction kept).
 RELATED DOCS: tests/features/agent_swarm/FEATURE.md; docs/spec/agent-swarm-v2/spec.md sections 6.1 (INV-30 to INV-35), 6.2, 6.3, 8.5 (_after_tool_iteration) and 13.
 TESTS: PYTHONPATH=$(pwd) python -m pytest tests/features/agent_swarm/test_agent_swarm_compaction.py -q
 """
@@ -125,6 +125,24 @@ def _is_summary(message: dict[str, Any], text: str) -> bool:
     # INV-34: an assistant message that opens with the prefix leaf and ends with the summarizer's text.
     content = str(message.get("content") or "")
     return message.get("role") == "assistant" and content.startswith(prompt_text("compaction_summary_prefix").strip()) and content.rstrip().endswith(text)
+
+
+def _write_parts(tmp_path: Path, count: int, chars: int) -> None:
+    # Files part1.txt to part<count>.txt in a new workplace, each one line: a numbered mark and `chars` more characters.
+    root = workplace_path(tmp_path)
+    root.mkdir()
+    for n in range(1, count + 1):
+        (root / f"part{n}.txt").write_text(f"PART-{n}-" + "r" * chars, encoding="utf-8", newline="")
+
+
+def _gemini_builder() -> dict[str, Any]:
+    # The build_swarm fields that make builder a Gemini member beside an OpenAI tester.
+    return {"agents": (member("builder", provider="gemini", model_name=GEMINI_MODEL), member("tester")), "api_keys": (FAKE_OPENAI_KEY, FAKE_GEMINI_KEY)}
+
+
+def _is_side_call(call: Any) -> bool:
+    # A compaction summary side call is the call whose system string is the summarizer leaf.
+    return template_regex(prompt_text("compaction_summarizer_prompt")).search(call.system) is not None
 
 
 @pytest.mark.asyncio
@@ -323,6 +341,88 @@ async def test_automatic_compaction_waits_for_a_target_of_new_history_and_a_comp
     assert of_kind(result.events, TRIMMED) == [] and of_kind(result.events, MODEL_ERROR) == []
     assert_event_invariants(result, NAMES, max_turns=swarm.settings.max_turns, log=log)
     scripted.assert_complete()
+
+
+@pytest.mark.asyncio
+async def test_a_gemini_member_compacts_again_each_time_its_parts_history_grows_by_the_target(tmp_path: Path) -> None:
+    """INV-32, INV-33 (S5 re-review R-20), INV-36: a Gemini member's provider reports promptTokenCount at AGENT_SWARM_COMPACTION_TRIGGER_TOKENS on every call, and builder reads one 30,000-character file per iteration, about 7,500 estimated tokens held only in parts. Nothing older exists before iteration 4, so the first compaction is iteration 4's; each later automatic compaction waits until the whole-message estimate of the parts history has grown by AGENT_SWARM_COMPACTION_TARGET_TOKENS, four more reads, so iterations 8 and 12 compact again and the 90,000-token trim never fires."""
+    from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_COMPACTION_TARGET_TOKENS as TARGET
+    from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_COMPACTION_TRIGGER_TOKENS as TRIGGER
+    from vidbyte.lib.enums import AgentSwarmCompactionTrigger
+
+    # Three reads stay under the target and four pass it, each by thousands of tokens.
+    reads, part_chars = 14, 30_000
+    assert 3 * part_chars // 4 < TARGET < 4 * part_chars // 4
+    _write_parts(tmp_path, reads, part_chars)
+    at_trigger = {"input_tokens": TRIGGER, "output_tokens": 2}
+    loop: list[Any] = []
+    side_after: list[int] = []
+
+    def builder(call: Any) -> Any:
+        # A summary side call is answered with the summary; a loop call reads the next part and reports the trigger.
+        if _is_side_call(call):
+            side_after.append(len(loop))
+            return reply(SUMMARY)
+        loop.append(call)
+        if len(loop) > reads:
+            return reply("Builder done.", usage=at_trigger)
+        return tool_call("read_lines", {"path": f"part{len(loop)}.txt"}, usage=at_trigger)
+
+    log = EventLog()
+    scripted = ScriptedSwarm({"tester": [reply("Tester done.")]}, behaviours={"builder": builder})
+    swarm, result = await _run_unchecked(tmp_path, scripted, log, **_gemini_builder())
+
+    # The reads reached the model as parts with no content key, so an estimate of content alone never sees the history grow.
+    assert [(message["role"], sorted(message)) for message in loop[1].messages] == [("model", ["parts", "role"]), ("user", ["parts", "role"])]
+    assert "PART-1-" in json.dumps(loop[1].messages[1]["parts"])
+    assert side_after == [4, 8, 12], f"summary side calls followed loop calls {side_after}"
+    auto = AgentSwarmCompactionTrigger.AUTO
+    compactions = [(event.compaction_trigger, event.text, event.input_tokens, event.messages_dropped) for event in of_kind(result.events, COMPACTION, "builder")]
+    assert compactions == [(auto, "", TRIGGER, 2), (auto, "", TRIGGER, 9), (auto, "", TRIGGER, 9)], describe(result.events)
+    assert of_kind(result.events, TRIMMED) == [] and of_kind(result.events, MODEL_ERROR) == []
+    _check(swarm, result, scripted, log)
+
+
+@pytest.mark.asyncio
+async def test_a_gemini_member_whose_provider_reports_no_usage_compacts_when_its_estimate_reaches_the_trigger(tmp_path: Path) -> None:
+    """INV-32, INV-33 (S5 re-review R-20), EC-8: a Gemini member whose provider reports no usage is measured by the whole-message estimate of its parts history. Builder reads five 60,000-character files, about 15,000 estimated tokens each, so the estimate after four reads is under AGENT_SWARM_COMPACTION_TRIGGER_TOKENS and after five it is over; iteration 5 makes the one summary side call, keeps the newest read, and records compaction (auto, "", the estimate of the history at that check, eight messages)."""
+    from vidbyte.agents.agent_swarm.member import AgentSwarmMemberRuntime
+    from vidbyte.lib.constants.agent_swarm import AGENT_SWARM_COMPACTION_TRIGGER_TOKENS as TRIGGER
+    from vidbyte.lib.enums import AgentSwarmCompactionTrigger
+
+    reads, part_chars = 5, 60_000
+    assert (reads - 1) * part_chars // 4 < TRIGGER < reads * part_chars // 4
+    _write_parts(tmp_path, reads, part_chars)
+    loop: list[Any] = []
+    side_after: list[int] = []
+
+    def builder(call: Any) -> Any:
+        # No response reports usage, the summary's included; a loop call reads the next part.
+        if _is_side_call(call):
+            side_after.append(len(loop))
+            return reply(SUMMARY, usage={})
+        loop.append(call)
+        if len(loop) > reads:
+            return reply("Builder done.", usage={})
+        return tool_call("read_lines", {"path": f"part{len(loop)}.txt"}, usage={})
+
+    log = EventLog()
+    scripted = ScriptedSwarm({"tester": [reply("Tester done.")]}, behaviours={"builder": builder})
+    swarm, result = await _run_unchecked(tmp_path, scripted, log, **_gemini_builder())
+
+    # The reads reached the model as parts, and builder's provider reported nothing, so its model_called events carry zeros.
+    assert [(message["role"], sorted(message)) for message in loop[1].messages] == [("model", ["parts", "role"]), ("user", ["parts", "role"])]
+    assert {(event.input_tokens, event.output_tokens) for event in of_kind(result.events, MODEL_CALLED, "builder")} == {(0, 0)}
+    assert side_after == [5], f"summary side calls followed loop calls {side_after}"
+    # The history at iteration 5's check is the history sent on loop call 5 plus the read it kept, which loop call 6 carries after the summary.
+    estimate = AgentSwarmMemberRuntime._estimate
+    checked = loop[4].messages + loop[5].messages[1:]
+    compactions = [(event.compaction_trigger, event.text, event.input_tokens, event.messages_dropped) for event in of_kind(result.events, COMPACTION, "builder")]
+    assert compactions == [(AgentSwarmCompactionTrigger.AUTO, "", estimate(checked), 8)], describe(result.events)
+    assert _is_summary(loop[5].messages[0], SUMMARY) and len(loop[5].messages) == 3
+    # The member's estimate counts every read's characters, and four reads were not enough.
+    assert estimate(loop[4].messages) < TRIGGER and estimate(checked) >= reads * part_chars // 4, (estimate(loop[4].messages), estimate(checked))
+    _check(swarm, result, scripted, log)
 
 
 @pytest.mark.asyncio
