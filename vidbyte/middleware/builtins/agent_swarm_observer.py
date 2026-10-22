@@ -58,11 +58,12 @@ class AgentSwarmObserverMiddleware(AgentMiddleware):
         return MiddlewareDecision.continue_()
 
     async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Report the failed model attempt and let the loop's own retry and fallback decide what happens next."""
+        """Report the failed model attempt and continue; AgentSwarm installs no retry, so the failed call then fails the member."""
         # @intent model-errors-are-observed-never-decided
-        # Every failed attempt is recorded, even one a retry later
-        # absorbs, and the decision always continues, so the loop's
-        # retry policy is untouched by the swarm.
+        # Every failed attempt is recorded, even one a retry would
+        # absorb, and the decision always continues, so the swarm never
+        # decides a retry itself. AgentSwarm installs no retry, so the
+        # first failed loop model call fails the member (INV-23).
         if ctx.error is not None:
             await self.swarm_runtime.record_model_error(ctx.agent_name, ctx.error)
         return MiddlewareDecision.continue_()
