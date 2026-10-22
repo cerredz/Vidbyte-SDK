@@ -38,3 +38,26 @@ Gate set (from context/code-map.md §1 and the S5 briefing), in CI order, every 
 | remote checks | `gh workflow run ci.yml` / `static-policy.yml` on `6d604082` | PASS 2/2 (headSha `6d604082c1c0…` on both) | CI 39689652565 `success`: Source 3.11 `6480 passed, 57 skipped in 119.02s` · `CI passed.`; Source 3.12 `SDK-LINT: PASS` · `6480 passed, 57 skipped, 19 warnings in 125.90s` · `CI passed.`; Package `Installed vidbyte-sdk 0.3.0 passed smoke checks.` · `CI passed.` · Static policy 39689655332 `success`: `1/1: ✓ All tests passed` · `Findings: 0 (0 blocking)` · `Ran 1 rule on 996 files: 0 findings.` |
 
 **Still open:** R-17, R-18 and R-19 (`[scope-adding]` follow-ups for the user, not built). Observation O-1, the CJK context overflow from r4's estimate-based hysteresis, needs a spec decision. Spec wording the orchestrator may want to record: §8.5 still names `_end_check` and `_measured_context(messages)`.
+
+## Iteration 2 — 2026-10-21 — tests only (S2 amendment round 2) after post-repair re-review 1
+**Defects in:** the re-review (reports/S5-rereview-1.md) confirmed R-1..R-16 FIXED and found three surviving mutants. The orchestrator re-ran them itself: `estimate_content_only`, `snapshot_only_auto`, and `growth_strict_gt` each gave `275 passed`, while the control `keep_content_only` gave `2 failed, 273 passed`. Logged as R-20 (Major), R-21 (Minor), and R-22 (Minor, spec drift) in review.md.
+
+**What was done:**
+- **No product change** (`git diff 04cf9caa..HEAD -- vidbyte/` is empty).
+- **R-22:** fixed in spec r6, `6bb264c8` (orchestrator).
+- **R-20, R-21:** S2, the test owner, added 5 cases. `ce8053ed` is R-20: two Gemini tests, growth recompaction and the no-usage fallback. `b4dc91d0` is R-21: a compact request restarts the growth count, plus an exact-target vs one-below boundary test. The fixture's `tool_call` gained an optional `call_id`; its default is unchanged.
+
+**Hypotheses:** none needed. The defects were missing tests, not wrong code. S2 checked the five cases under three other whole-message estimates (JSON per message, whole-list JSON, string values only), and all three pass, so the cases pin INV-33's rule, not the `str(message)` text.
+
+**Gate matrix (orchestrator runs at b1ecb95a):**
+- Pack: `280 passed`.
+- Mutants:
+  - `estimate_content_only`: `3 failed, 277 passed`.
+  - `snapshot_only_auto`: `1 failed, 279 passed`.
+  - `growth_strict_gt`: `1 failed, 279 passed`.
+  - S2 ran all 31 mutants before and after: kills went from 27 to 30, and the only survivor is `keep_last_zero` (equivalent).
+- Lint: `SDK-LINT: PASS`.
+- Source stage: `3 failed, 6523 passed, 16 skipped`. The 3 are the inherited `harness_threads` cases (`test_failure_codes_keep_main_and_append_exactly_the_28_harness_codes`, `test_branch_leaves_the_tools_and_configs_packages_as_main_has_them`, `test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded`).
+- Public API `--check`, package stage, and semgrep: their inputs (`vidbyte/`, `pyproject.toml`) are unchanged since 04cf9caa, where all three were green. Remote CI and Static policy re-run them on the pushed head.
+
+**Still open:** R-17, R-18, R-19 (`[scope-adding]`, Q-6..Q-8), and A-12 / Q-9 (limitation).
