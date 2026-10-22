@@ -1,0 +1,2 @@
+From {sender}:
+{text}

@@ -182,6 +182,36 @@ The workspace holds `entries.jsonl` (short typed memory entries, committed for a
 
 Pass a plain (not async) function as `on_event` in the settings to receive one typed `InfiniteEvent` per step of the run, in order, on the agent's loop thread: the run starting, resuming, finishing, or stopping, each pair launched, replayed, and finished, each generator's reply, each memory entry saved, staged, or dropped, each note written, and each refused call. Events are capped in size, and a sink that raises never stops the run. Every successful reply carries the journal's run id in `reply.metadata["infinite_run_id"]`, and `agent.run_handoff(run_id)` builds that run's nine-section `InfiniteHandoff` from the journal and the workspace without a model call and saves it as `.runs/<run_id>.handoff.md`.
 
+## AgentSwarm
+
+`AgentSwarm` runs several agents you define on one goal at once, in one shared folder, and lets them message each other. You name the agents and their models; every agent gets the same sectioned system prompt (its environment, tools, optional web search, messaging, turns, the goal, instructions, the objective, and eight thoroughness practices), so the agents decide together who does what.
+
+```python
+import asyncio
+
+from vidbyte import AgentSwarm, AgentSwarmMember, AgentSwarmSettings
+
+settings = AgentSwarmSettings(
+    agents=(
+        AgentSwarmMember(name="ada", provider="openai", model_name="gpt-4.1"),
+        AgentSwarmMember(name="ben", provider="openai", model_name="gpt-4.1"),
+        AgentSwarmMember(name="cleo", provider="openai", model_name="gpt-4.1"),
+    ),
+    workplace="swarm-workplace",          # created if missing, never cleaned
+    api_keys=["sk-proj-..."],             # matched to each member's provider
+    web_search="tavily",                  # AgentSwarmWebSearch value; None means no web search
+    web_search_api_key="tvly-...",
+    on_event=lambda event: print(event.sequence, event.kind.value, event.agent, event.peer, event.text),
+)
+
+result = asyncio.run(AgentSwarm(settings).arun("Build a Celsius-to-Fahrenheit command-line tool with tests."))
+print(result.stop_reason.value, len(result.events), len(result.replies))
+```
+
+Every agent holds `bash`, `grep`, `read_lines`, `write_text`, and `patch_file` in the workplace, `message`, which queues a text for any agent of the swarm, itself included, and returns at once, `compact`, which asks for its own history to be summarized before its next model call, and, when `web_search` names a provider (`brave`, `browserbase`, `exa`, `parallel`, or `tavily`), that provider's search tool. A message reaches a working agent once the tool calls of its current model response have run, and wakes an idle one; a send to an agent that has stopped succeeds but is recorded as undelivered. An agent's history is also compacted automatically once its reported prompt size reaches the compaction trigger (and, after its first compaction, once its history has also grown by the compaction target), through a handoff summary its own model writes, and the summary call counts against the token budget. A turn ends when the agent replies without a tool call or calls `isDone`. Once no agent is working, the swarm ends `failed` if every agent failed or exited, `max_turns` if a message is still waiting because the turn budget ran out before it could wake its recipient, and `quiet` otherwise; it ends `max_tokens` when one model call brings the swarm's token total to `max_tokens`, and `timeout` at `timeout_seconds`.
+
+`on_event` receives every event in order, and the result holds the stop reason, every event, and the last reply of every agent the swarm released. The twenty-four event kinds fall into five groups. The run's frame is `workplace_prepared`, `swarm_stopping`, and `swarm_ended`. Each agent's life is `agent_created`, `agent_started`, `agent_idle`, `agent_woke`, and one ending of `agent_released`, `agent_cancelled`, `agent_failed`, or `agent_exited`. Messaging is `message_sent`, `message_refused`, `message_delivered`, `message_undelivered`, and `wake_refused`. Model work is `model_called`, `model_error`, `history_trimmed`, and `compaction`. Tool work is `tool_called`, `tool_result_truncated`, `file_changed`, and `command_failed`. The defaults allow 2 to 500 agents, 100,000 turns, 10,000,000,000 tokens, and one day; every limit is a constant in `vidbyte/lib/constants/agent_swarm.py`, enforced in code and never stated as a number in the prompts. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/agent_swarm/README.md` for the limits, the event fields, and the known edge cases.
+
 ## Model Fallback
 
 An agent can declare an ordered chain of backup models. Array index sets precedence:
@@ -478,6 +508,7 @@ their sources, are in "Reasoning Effort Sources" in
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal; streams typed run events and builds a deterministic run handoff.
+- `agent_swarm/`: `AgentSwarm`, several developer-defined agents that run at once in one shared folder, message each other, and stop when none has work left, with one numbered event record per run.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
 - `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload and for any caller that imports `SkillLoader` from the package root.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.

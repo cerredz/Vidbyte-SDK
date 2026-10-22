@@ -9,7 +9,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteEvent, InfiniteEventKind, InfiniteHandoff, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteEvent, InfiniteEventKind, InfiniteHandoff, AgentSwarm, AgentSwarmSettings, AgentSwarmMember, AgentSwarmEventKind, AgentSwarmStopReason, AgentSwarmWebSearch, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Agent setting exports: AgentLoopSettings (loop limits), PermissionPolicy (which ToolPermission levels tools may use), TextModelMode (gateway or direct text calls) and ReasoningEffort (the provider-neutral reasoning effort a DIRECT text call sends), which BaseAgent and JevAgentSettings take, plus JevDynamicComputeOption, the values of JevComputeSettings.dynamic_compute, and DecisionModelConfig with its DecisionModelMode, the decision-model record JevRuntimeSettings.decision holds, so a caller limited to root names, such as vidbyte-cli, can set JevAgent's loop, permission, text-mode, reasoning-effort, compute and decision-model options.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
@@ -63,6 +63,8 @@ from vidbyte.agents import (
     AgentSpeedRollup,
     AgentSpeedTracker,
     AgentStopReason,
+    AgentSwarm,
+    AgentSwarmSettings,
     AgentTransfer,
     AggregateAgent,
     AggregateConfig,
@@ -449,6 +451,7 @@ from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
     AdversarialAgentDescriptor,
 )
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
+from vidbyte.lib.dataclasses.agent_swarm import AgentSwarmMember
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.browser_tools import BrowserThreadResult, BrowserToolCall
 from vidbyte.lib.dataclasses.coding import CodingAgentSettings
@@ -489,6 +492,9 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.dataclasses.skills import SkillResolution
 from vidbyte.lib.enums import (
+    AgentSwarmEventKind,
+    AgentSwarmStopReason,
+    AgentSwarmWebSearch,
     BudgetPreset,
     DecisionModelMode,
     GrokCommand,
@@ -865,6 +871,12 @@ __all__ = [
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryPreset",
     "InfiniteWorkspaceSettings",
+    "AgentSwarm",
+    "AgentSwarmEventKind",
+    "AgentSwarmMember",
+    "AgentSwarmSettings",
+    "AgentSwarmStopReason",
+    "AgentSwarmWebSearch",
     "JevAgent",
     "JevAgentResponse",
     "JevAgentSettings",

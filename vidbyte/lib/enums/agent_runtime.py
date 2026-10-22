@@ -16,7 +16,9 @@ ARCHITECTURE NOTE:
 
 FUNCTION INVENTORY:
     ``AgentRuntimeStateKey`` -> reserved runtime-state key enum.
-    ``AgentRuntimeType`` -> configured runtime-family enum.
+    ``AgentRuntimeType`` -> configured runtime-family enum; ``AGENT_SWARM_MEMBER``
+    is the member loop AgentSwarm builds for each of its agents, and refuses
+    to run outside a swarm.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not add runtime behavior or mutable execution state; keep it in the
@@ -50,6 +52,7 @@ class AgentRuntimeType(str, Enum):
     ACTOR_MODEL_BROADCAST = "actor_model_broadcast"
     JEV = "jev"
     INFINITE_MEMORY = "infinite_memory"
+    AGENT_SWARM_MEMBER = "agent_swarm_member"
 
 
 __all__ = ["AgentRuntimeStateKey", "AgentRuntimeType"]
