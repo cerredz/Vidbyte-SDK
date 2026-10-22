@@ -180,6 +180,8 @@ The workspace holds `entries.jsonl` (short typed memory entries, committed for a
 
 `resume()` and `aresume()` continue the newest unfinished run, or the one named, from its journal: finished pairs are replayed from their recorded cards and interrupted ones run again. `Session` persistence and `fork()` are not supported. See `vidbyte/agents/infinite/README.md` for the layout, the limits, and the known edge cases.
 
+Pass a plain (not async) function as `on_event` in the settings to receive one typed `InfiniteEvent` per step of the run, in order, on the agent's loop thread: the run starting, resuming, finishing, or stopping, each pair launched, replayed, and finished, each generator's reply, each memory entry saved, staged, or dropped, each note written, and each refused call. Events are capped in size, and a sink that raises never stops the run. Every successful reply carries the journal's run id in `reply.metadata["infinite_run_id"]`, and `agent.run_handoff(run_id)` builds that run's nine-section `InfiniteHandoff` from the journal and the workspace without a model call and saves it as `.runs/<run_id>.handoff.md`.
+
 ## AgentSwarm
 
 `AgentSwarm` runs several agents you define on one goal at once, in one shared folder, and lets them message each other. You name the agents and their models; every agent gets the same sectioned system prompt (its environment, tools, optional web search, messaging, turns, the goal, instructions, the objective, and eight thoroughness practices), so the agents decide together who does what.
@@ -411,20 +413,104 @@ stage. See [`output/README.md`](output/README.md) for the delivery rules and
 [`../lib/outputs/README.md`](../lib/outputs/README.md) for each provider's
 credential and limits.
 
+## Spend Cap
+
+`AgentLoopSettings(max_spend_usd=...)` caps one reply's measured spend in USD: the
+SDK-rated cost of every model call, billed failed attempt, context-window side call,
+priced search or fetch, and finished child agent in the agent's own usage ledger. It
+cannot see a failed call that reported no usage, Vidbyte's relay fee, a tool that pays
+an API without recording it, or a gap between list price and the provider's invoice.
+
+```python
+from vidbyte import Agent, AgentLoopSettings, AgentStopReason
+
+agent = Agent(name="researcher", system_prompt="Answer directly.",
+              provider="openai", model_name="gpt-5.4-mini",
+              agent_loop_settings=AgentLoopSettings(max_spend_usd=0.50))
+reply = agent.run("Summarize the open issues in this repository.")
+stopped = reply.metadata["stop_reason"] == AgentStopReason.MAX_SPEND.value
+```
+
+The loop checks the cap before every model call, every tool call (isDone and the
+launch tools included), every plain-text finish, and JevAgent's compute checkpoint.
+JevAgent also checks it before a specialist it chose starts, so a run whose gate or
+run-state writer has already reached the cap starts no specialist. It
+is a threshold checked between steps, never a maximum bill: a run stops below the cap
+plus its largest single step, and concurrent children that inherit the cap can each
+spend up to it. A stopped reply has `stop_reason` `"max_spend"`, which sessions report
+as `resource.exhausted`; when the ledger cannot measure the spend, the run stops at the
+next check and its output names the cause. After a cap stop no SDK step continues the
+stopped work: no retry, reflection, review, grading, verifier, or queued prompt, and a
+`MultiAgent` worker's task is blocked. Only your own `after_run` middleware and a
+configured auto-handoff still run, and they can still spend. Read the spend with
+`agent.get_usage().cost_usd`; `cost_measured` on the same rollup says whether that is
+the whole measured spend or only a lower bound.
+
+The cap is per reply, hidden from the model, and not overridable through the fork tool.
+`Agent`, `CodingAgent`, `JevAgent`, and `InfiniteMemoryAgent` enforce it, as does every
+fork, clone, helper, or subagent built from the same settings, against its own spend.
+The SDK's own critic and prosecutor-defender-judge reviewer runs, and JevAgent's
+fixed-prompt agents, carry no cap by design: their spend counts at the parent's next
+check, so one review can carry a finished reply past the cap.
+Construction refuses it on a non-linear runtime, a non-text runner, a configured model
+the pricebook cannot price (OpenRouter, which reports its own cost, is exempt), a
+JevAgent specialist without its own cap at or below JevAgent's, and `CodexHarnessAgent`;
+`MultiAgent` and `AggregateAgent` members each enforce their own. Use one capped agent
+object per concurrent run, because overlapping replies reset each other's ledger.
+Unlike `CostBudgetMiddleware`, which estimates spend from tokens at a flat rate and
+stops with `middleware_abort`, the cap reads the priced ledger and fails closed.
+
+## Reasoning Effort
+
+`reasoning_effort`, a `ReasoningEffort` (`none`, `minimal`, `low`, `medium`,
+`high` or `xhigh`), asks the model to spend that much reasoning. Each provider
+adapter sends it in that provider's own documented form, such as OpenAI's
+`reasoning.effort` or Anthropic's `output_config.effort`, only on
+`TextModelMode.DIRECT` calls; nothing is sent when it is unset.
+
+```python
+from vidbyte import Agent, ReasoningEffort, TextModelMode
+
+agent = Agent(name="planner", system_prompt="Plan the change.",
+              provider="openai", model_name="gpt-5.5",
+              model_mode=TextModelMode.DIRECT,
+              reasoning_effort=ReasoningEffort.HIGH)
+```
+
+Construction refuses it with `ConfigurationError`, before any request or
+spend, in a gateway mode, for any model in the fallback chain that has no
+documented form for the value, for a model id the table does not list, on an
+agent that does not name both a provider and a model, and when its
+context-window algorithm calls models through runners it builds itself
+(`multi_provider_agentic_grader`, `independent_critic` with a reviewer, or
+`prosecutor_defender_judge` with a stage model). `TextModelConfig`
+also refuses it beside `thinking_config` or an `extra_body` key its wire form
+uses, and `Runner` refuses it for a non-text runner. It reaches every fallback
+hop, in that hop's own form; forks, whose own construction re-checks it
+against the child's model; `ContinualTraceAgent` and `HandoffAgent`; a
+checkpoint and `BaseAgent.restore`; and, through
+`JevAgentSettings.reasoning_effort`, JevAgent's main agent and its children.
+It does not reach Jev specialists, which keep their own setting, the run-brief
+writer, or Jev decision calls. The values each provider and model accept, and
+their sources, are in "Reasoning Effort Sources" in
+`vidbyte/lib/registries/README.md`.
+
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `fallback.py`: `AgentFallback`, the ordered model chain and the transforms that route a run to the next model.
+- `spend_cap.py`: `AgentSpendCap`, which decides from the live usage rollup whether a run with `AgentLoopSettings.max_spend_usd` must stop.
+- `reasoning_effort.py`: `AgentReasoningEffortGuard`, the construction refusal for `reasoning_effort`.
 - `base.py` also opens the run's `SystemPromptPresetScope` (`vidbyte/lib/system_prompt_presets.py`) and composes presets in `_runtime()` through `SystemPromptPresetComposer` (`vidbyte/prompts/system_prompt_presets.py`).
 - `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
-- `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal.
+- `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal; streams typed run events and builds a deterministic run handoff.
 - `agent_swarm/`: `AgentSwarm`, several developer-defined agents that run at once in one shared folder, message each other, and stop when none has work left, with one numbered event record per run.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.
-- `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload.
+- `skills/`: `SkillLoader` and one resolver per source, the agent-agnostic loader that turns declarative skill entries into `SkillDocument`s for `JevAgent`'s skill preload and for any caller that imports `SkillLoader` from the package root.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
 - `output/`: the `OutputConnector` contract, reply shaping, and `OutputDispatcher`, which delivers each finished reply to the configured `outputs`.
 - `types.py`: agent messages, input envelopes, cards, and specs.

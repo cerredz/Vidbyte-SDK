@@ -45,6 +45,7 @@ class FailureMetadataNormalizer:
         "tool_settings_denied": FailureCode.TOOL_PERMISSION_DENIED,
         "tool_loop_limit": FailureCode.TOOL_LOOP_LIMIT,
         "timeout": FailureCode.RUNTIME_TIMEOUT,
+        "max_spend": FailureCode.RESOURCE_EXHAUSTED,
         "middleware_abort": FailureCode.RUNTIME_MIDDLEWARE_ABORT,
         "contract_unsatisfied": FailureCode.CONTRACT_UNSATISFIED,
         "error": FailureCode.RUNTIME_ERROR,

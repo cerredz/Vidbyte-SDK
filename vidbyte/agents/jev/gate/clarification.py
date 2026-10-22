@@ -57,6 +57,7 @@ class JevClarificationAgent(BaseAgent):
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
+            reasoning_effort=settings.reasoning_effort,
             timeout_seconds=settings.timeout_seconds,
             output_schema=JevClarificationPayload,
             # @intent clarifier-keeps-its-fixed-prompt

@@ -604,6 +604,9 @@ something was free.
 4. **Missing config raises `ProviderConfigurationError`**, not `ValueError` or `KeyError`, and it
    carries `provider=self.provider.value`.
 5. **API keys never appear in a URL.** Header auth only.
+6. **The reasoning effort is attached, never hand-built.** Each text payload builder calls
+   `ReasoningEffortRegistry.attach` immediately before `_attach_extra_body`; a new provider adds
+   its wire form and model rows to `vidbyte/lib/configs/reasoning_effort.py` with a raw-doc source.
 
 ## Adding A Provider
 

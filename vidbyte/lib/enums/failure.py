@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Codes are stable data-contract values; raw exception text is 
 COMMON MODIFICATION PATTERNS: Add a category-prefixed code with docs, mapping coverage, and a focused test.
 KNOWN EDGE CASES: Unknown exceptions map to runtime.error rather than inventing a new taxonomy entry.
 RELATED DOCS: docs/design/session-failure-vocabulary.md; skills/failure/vocabulary.md.
-TESTS: python scripts/test-session-failure-vocabulary.py.
+TESTS: python scripts/test-session-failure-vocabulary.py; tests/features/codex_host/test_codex_host_helper_surface.py and tests/features/codex_host/test_codex_host_records.py.
 """
 
 from __future__ import annotations
@@ -44,6 +44,25 @@ class FailureCode(str, Enum):
     CODEX_MIDDLEWARE_ABORTED = "codex.middleware_aborted"
     CODEX_MIDDLEWARE_UNSUPPORTED = "codex.middleware_unsupported"
     CODEX_RUN_OPTION_UNSUPPORTED = "codex.run_option_unsupported"
+    CODEX_NOT_INSTALLED = "codex.not_installed"
+    CODEX_VERSION_UNSUPPORTED = "codex.version_unsupported"
+    CODEX_NOT_SIGNED_IN = "codex.not_signed_in"
+    CODEX_USAGE_LIMITED = "codex.usage_limited"
+    CODEX_MODEL_UNKNOWN = "codex.model_unknown"
+    CODEX_SESSION_NOT_FOUND = "codex.session_not_found"
+    CODEX_SESSION_BUSY = "codex.session_busy"
+    CODEX_BUDGET_EXHAUSTED = "codex.budget_exhausted"
+    CODEX_API_ERROR = "codex.api_error"
+    CODEX_PERMISSION_DENIED = "codex.permission_denied"
+    CODEX_SANDBOX_NOT_READY = "codex.sandbox_not_ready"
+    CODEX_SCHEMA_VIOLATION = "codex.schema_violation"
+    CODEX_PROCESS_EXITED = "codex.process_exited"
+    CODEX_PROTOCOL_MISMATCH = "codex.protocol_mismatch"
+    CODEX_TURN_TIMED_OUT = "codex.turn_timed_out"
+    CODEX_COMMAND_NOT_RUN = "codex.command_not_run"
+    CODEX_SKILL_NOT_FOUND = "codex.skill_not_found"
+    CODEX_SKILL_DISABLED = "codex.skill_disabled"
+    CODEX_GOAL_UNFINISHED = "codex.goal_unfinished"
     INPUT_EMPTY = "input.empty"
     INPUT_INVALID = "input.invalid"
     INPUT_TYPE_INVALID = "input.type_invalid"
@@ -170,6 +189,16 @@ class FailureCode(str, Enum):
     MUSE_PROTOCOL_MISMATCH = "muse.protocol_mismatch"
     MUSE_RUN_FAILED = "muse.run_failed"
     MUSE_WSL_UNAVAILABLE = "muse.wsl_unavailable"
+    # The browser tools of the harness thread functions, shared by every
+    # harness (skills/failure/vocabulary.md, "Browser tools").
+    BROWSER_MOUNT_UNSUPPORTED = "browser.mount_unsupported"
+    BROWSER_RUNTIME_MISSING = "browser.runtime_missing"
+    BROWSER_TOOL_INSTALL_FAILED = "browser.tool_install_failed"
+    BROWSER_TOOLS_UNAVAILABLE = "browser.tools_unavailable"
+    GROK_COMMAND_NOT_RUN = "grok.command_not_run"
+    OPENCODE_COMMAND_NOT_RUN = "opencode.command_not_run"
+    MUSE_COMMAND_NOT_RUN = "muse.command_not_run"
+    GROK_STORE_UNREADABLE = "grok.store_unreadable"
 
     @property
     def category(self) -> str:

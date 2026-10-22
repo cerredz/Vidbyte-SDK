@@ -2,13 +2,13 @@
 
 PURPOSE: Defines the launch_subagent tool and InfinitePair, its pipeline stage: the root or a generator hands over a batch of tasks, each task runs as a fresh generator followed by a fresh verifier that checks and fixes its work, the pair's staged memory entries are committed or dropped by the verdict, and the parent gets back one short result card per task.
 ROLE IN CODEBASE: InfiniteMemoryRuntime (runtime.py) adds one InfiniteLaunchTool to the root for each run; InfinitePair adds one to every generator, with a DelegationLimitsMiddleware (vidbyte/middleware/builtins/delegation_limits.py) at the generator's depth that refuses a call past max_depth or max_parallel. Pairs use InfiniteWorkspace (workspace.py) for context entries, commits, and the map, InfiniteRunJournal (journal.py) to record and replay pairs, and InfiniteAgentMemory (memory.py) for each child's memory tools.
-ARCHITECTURE NOTE: The tool checks the whole batch before anything starts, records every new pair as started, and runs the pairs at once through ParallelPipeline, as JevBulkWorkTool does. Each pair builds plain BaseAgents with a fresh context holding the workspace map, its own history-trimming middleware, and only the extras its task card names; a pair turns every SDK, disk, or decode error into its own card, so siblings and the parent keep going. The tool is internal, so the loop's tool timeout and result cap never cut a batch; the cards are capped here instead.
+ARCHITECTURE NOTE: The tool checks the whole batch before anything starts, records every new pair as started, and runs the pairs at once through ParallelPipeline, as JevBulkWorkTool does. Each pair builds plain BaseAgents with a fresh context holding the workspace map, its own history-trimming middleware, and only the extras its task card names; a pair turns every SDK, disk, or decode error into its own card, so siblings and the parent keep going. The tool is internal, so the loop's tool timeout and result cap never cut a batch; the cards are capped here instead. The tool and every pair announce what they do through the run's InfiniteEvents (events.py): a refused batch, each task in task order (launched after its started record, or replayed), each generator's reply, and each pair's card after its finished record; the pair keeps its committed and dropped entries and both replies for that last event.
 FUNCTION INVENTORY: InfiniteLaunchTool.spec builds the closed task-card schema; execute is the narrated main function, which reads the model's tasks with ToolArguments.records (vidbyte/lib/tools/arguments.py); _check applies the batch rules that need the journal or the workspace. InfinitePair.run is the narrated main function; _agent builds one child agent; _task_message and _verifier_message write the two first messages; _status, _verdict, _commit, _finish, and _error_text each do one step, and TokenEstimate.cap caps each card text; render and finished_lines format a card and a list of finished pairs for a parent.
 COMMON MODIFICATION PATTERNS: A new per-call delegation cap is one more field on DelegationLimits and one check in DelegationLimitsMiddleware; a batch rule that needs the journal or the workspace is one more check in _check with a message that says what to fix. A new task-card field adds the field to InfiniteTaskCard, one schema property and description leaf here, and its use in _task_message or _agent.
 WHAT NOT TO DO IN THIS FILE: 1. Do not start any agent before the whole batch passes _check and every new pair has its pair_started record. 2. Do not catch CancelledError or BaseException in InfinitePair.run; cancelling the run must stop every pair. 3. Do not give a child a developer tool its card does not name, or a verifier the launch tool. 4. Do not pass a child's transcript to its verifier or its parent; only the capped card goes up. 5. Do not add module-level constants here.
-KNOWN EDGE CASES: A batch of replays only skips ParallelPipeline, which refuses zero stages. An entry superseded between the batch check and the pair's start fails that pair. An error outside VidbyteSdkError, OSError, and ValueError escapes the pair and the call while its siblings keep running (spec EC-41). A pair whose generator raised or answered blank has status failed, no verifier, and every staged entry dropped.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-4 to INV-16 and INV-26 to INV-31, and 9.2); vidbyte/agents/infinite/README.md; vidbyte/agents/jev/bulk_work.py (the pattern this follows)
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_resume.py
+KNOWN EDGE CASES: A batch of replays only skips ParallelPipeline, which refuses zero stages. An entry superseded between the batch check and the pair's start fails that pair. An error outside VidbyteSdkError, OSError, and ValueError escapes the pair and the call while its siblings keep running (spec EC-41). A pair whose generator raised or answered blank has status failed, no verifier, and every staged entry dropped. Pairs that keep running after an error escaped their batch can announce events after run_finished or run_stopped (spec EC-12). A batch refused by DelegationLimitsMiddleware never reaches execute, so it announces nothing (EC-37). A dropped entry is rendered into the card exactly as before, as "<key> (<text>): <note>".
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-4 to INV-16 and INV-26 to INV-31, and 9.2); docs/spec/infinite-memory-events/spec.md (sections 6.1 and 9.1); vidbyte/agents/infinite/README.md; vidbyte/agents/jev/bulk_work.py (the pattern this follows)
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_delegation.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, tests/features/infinite_memory_agent/test_infinite_memory_resume.py, and tests/features/infinite_memory_agent/test_infinite_memory_events_pairs.py
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from pathlib import Path
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.fork import AgentForker
+from vidbyte.agents.infinite.events import InfiniteEvents
 from vidbyte.agents.infinite.journal import InfiniteRunJournal
 from vidbyte.agents.infinite.memory import InfiniteAgentMemory
 from vidbyte.agents.infinite.settings import InfiniteMemoryAgentSettings
@@ -44,12 +45,15 @@ from vidbyte.lib.constants.infinite import (
 )
 from vidbyte.lib.dataclasses.agents import AgentMessage, AgentStopReason
 from vidbyte.lib.dataclasses.infinite import (
+    InfiniteCommittedEntry,
+    InfiniteDroppedEntry,
     InfiniteResultCard,
     InfiniteStagedEntry,
     InfiniteTaskCard,
 )
 from vidbyte.lib.enums.infinite import (
     InfiniteAgentRole,
+    InfiniteDropReason,
     InfiniteResultStatus,
     InfiniteVerdict,
 )
@@ -73,10 +77,11 @@ from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 class InfiniteLaunchTool(BaseTool):
     """The launch_subagent tool: run a batch of generator and verifier pairs at once and return one result card per task."""
 
-    def __init__(self, settings: InfiniteMemoryAgentSettings, workspace: InfiniteWorkspace, journal: InfiniteRunJournal, *, key: str, depth: int, extras: tuple[BaseTool, ...]) -> None:
+    def __init__(self, settings: InfiniteMemoryAgentSettings, workspace: InfiniteWorkspace, journal: InfiniteRunJournal, *, key: str, depth: int, extras: tuple[BaseTool, ...], events: InfiniteEvents) -> None:
         self.settings = settings
         self.workspace = workspace
         self.journal = journal
+        self.events = events
         # The launching agent's key and depth, and the developer tools
         # it may hand on to its pairs.
         self.key = key
@@ -130,13 +135,22 @@ class InfiniteLaunchTool(BaseTool):
             pairs = {key: InfinitePair(self, card, key) for card, key in zip(cards, keys, strict=True) if self.journal.finished(key) is None}
             self._check(cards, tuple(pair.card for pair in pairs.values()))
         except (ConfigurationError, ToolExecutionError) as exc:
+            self.events.batch_rejected(self, exc.message)
             return ToolResult.error(INFINITE_LAUNCH_TOOL_NAME, prompts.get(Prompt.INFINITE_MEMORY_LAUNCH_REJECTED_PROMPT).format(problem=exc.message))
 
         # @intent pairs-are-journaled-before-they-start
         # Record every new pair as started before any agent runs, so a
         # crash leaves it listed as interrupted for resume.
-        for key in pairs:
-            self.journal.pair_started(key)
+        # @intent launches-are-announced-in-task-order
+        # Announce each task in the order the model listed it: a new
+        # pair right after its started record, a finished one as a
+        # replay of the card it recorded.
+        for task, key in zip(cards, keys, strict=True):
+            if key in pairs:
+                self.journal.pair_started(key)
+                self.events.subagent_launched(self, task)
+            elif (recorded := self.journal.finished(key)) is not None:
+                self.events.subagent_replayed(self, recorded)
 
         # Run the new pairs at the same time; a batch of replays only
         # skips this, because the pipeline needs at least one stage.
@@ -190,10 +204,13 @@ class InfinitePair(BasePipeline):
         self.result: InfiniteResultCard | None = None
         self.criteria = "\n".join(f"- {item}" for item in card.done_criteria)
         # The generator and the verifier share the staged and dropped
-        # lists, so the verifier can review and drop what was staged.
+        # lists, so the verifier can review and drop what was staged;
+        # the committed entries and both replies feed the pair's last
+        # event.
         self.staged: list[InfiniteStagedEntry] = []
-        self.dropped: list[str] = []
-        self.entries: list[int] = []
+        self.dropped: list[InfiniteDroppedEntry] = []
+        self.committed: list[InfiniteCommittedEntry] = []
+        self.replies: list[AgentMessage] = []
 
     async def run(self, prompt: str) -> str:
         """Run the generator, then its verifier, commit or drop the staged entries, record the card, and return its text."""
@@ -202,8 +219,9 @@ class InfinitePair(BasePipeline):
         # Each child gets its own memory tools over this pair's shared
         # staged and dropped lists, and the card lists the files both
         # wrote.
-        writer = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_GENERATOR_KEY}", role=InfiniteAgentRole.GENERATOR, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
-        checker = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_VERIFIER_KEY}", role=InfiniteAgentRole.VERIFIER, run_id=launch.journal.run_id, staged=self.staged, dropped=self.dropped)
+        level = launch.depth + INFINITE_DEPTH_STEP
+        writer = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_GENERATOR_KEY}", role=InfiniteAgentRole.GENERATOR, run_id=launch.journal.run_id, depth=level, events=launch.events, staged=self.staged, dropped=self.dropped)
+        checker = InfiniteAgentMemory(launch.workspace, key=f"{self.key}/{INFINITE_VERIFIER_KEY}", role=InfiniteAgentRole.VERIFIER, run_id=launch.journal.run_id, depth=level, events=launch.events, staged=self.staged, dropped=self.dropped)
         # @intent one-failed-pair-never-sinks-its-siblings
         # Every SDK, disk, or decode error, up to and including the card
         # and its journal record, becomes this pair's own card, so
@@ -218,6 +236,9 @@ class InfinitePair(BasePipeline):
             reply = await self._agent(writer).arun(self._task_message(writer, finished))
             summary = TokenEstimate.cap(reply.content.strip(), INFINITE_CARD_TEXT_MAX_TOKENS, INFINITE_TRUNCATION_MARKER)
             status = self._status(reply)
+            # Keep the reply for the pair's usage and announce it.
+            self.replies.append(reply)
+            launch.events.generator_finished(writer, reply, status, summary)
 
             # @intent a-fair-turn-between-generator-and-verifier
             # Yield once between this pair's generator and its verifier,
@@ -229,7 +250,9 @@ class InfinitePair(BasePipeline):
             # Unless the generator failed, a fresh verifier gets the
             # outcome, never the transcript, checks it, and fixes it.
             if status is not InfiniteResultStatus.FAILED:
-                review = (await self._agent(checker).arun(self._verifier_message(checker, status, summary, tuple(writer.files_written)))).content
+                checked = await self._agent(checker).arun(self._verifier_message(checker, status, summary, tuple(writer.files_written)))
+                self.replies.append(checked)
+                review = checked.content
                 verdict = self._verdict(review)
 
             # @intent only-judged-entries-reach-memory
@@ -268,7 +291,7 @@ class InfinitePair(BasePipeline):
         match memory.role:
             case InfiniteAgentRole.GENERATOR:
                 rules = Prompts().get(Prompt.INFINITE_MEMORY_GENERATOR_SYSTEM_PROMPT)
-                delegation = (InfiniteLaunchTool(settings, launch.workspace, launch.journal, key=memory.key, depth=level, extras=granted),)
+                delegation = (InfiniteLaunchTool(settings, launch.workspace, launch.journal, key=memory.key, depth=level, extras=granted, events=launch.events),)
                 limits = (DelegationLimitsMiddleware(settings.delegation_limits, depth=level),)
             case _:
                 rules = Prompts().get(Prompt.INFINITE_MEMORY_VERIFIER_SYSTEM_PROMPT)
@@ -310,13 +333,17 @@ class InfinitePair(BasePipeline):
 
     @staticmethod
     def _status(reply: AgentMessage) -> InfiniteResultStatus:
-        # A blank reply is a failure; a normal finish is done, and any
-        # other stop with a reply is partial work worth verifying.
+        # A blank reply is a failure; a normal finish is done; a
+        # spend-cap stop is a failure, so no verifier spends after it;
+        # and any other stop with a reply is partial work worth
+        # verifying.
         if not reply.content.strip():
             return InfiniteResultStatus.FAILED
         match reply.metadata.get("stop_reason"):
             case AgentStopReason.FINAL_RESPONSE | AgentStopReason.IS_DONE:
                 return InfiniteResultStatus.DONE
+            case AgentStopReason.MAX_SPEND:
+                return InfiniteResultStatus.FAILED
             case _:
                 return InfiniteResultStatus.PARTIAL
 
@@ -338,18 +365,25 @@ class InfinitePair(BasePipeline):
             try:
                 entry = launch.workspace.commit_entry(item.draft, by=item.author, verified_by=f"{self.key}/{INFINITE_VERIFIER_KEY}", run=launch.journal.run_id)
             except ToolExecutionError as exc:
-                self.dropped.append(f"{item.key} ({item.draft.text}): {exc.message}")
+                self.dropped.append(InfiniteDroppedEntry(key=item.key, text=item.draft.text, reason=InfiniteDropReason.RULE, note=exc.message))
             else:
-                self.entries.append(entry.id)
+                self.committed.append(InfiniteCommittedEntry(staged_key=item.key, entry_id=entry.id, kind=item.draft.kind, text=item.draft.text))
             self.staged.remove(item)
 
     def _finish(self, status: InfiniteResultStatus, verdict: InfiniteVerdict, summary: str, review: str, files: tuple[str, ...]) -> InfiniteResultCard:
         # Every entry still staged is dropped with the verdict as its
-        # reason; then the card is built and the pair recorded finished.
-        self.dropped.extend(f"{item.key} ({item.draft.text}): not committed, because the verdict is {verdict.value}" for item in self.staged)
+        # reason; then the card is built, the pair recorded finished,
+        # and the card announced.
+        self.dropped.extend(InfiniteDroppedEntry(key=item.key, text=item.draft.text, reason=InfiniteDropReason.UNCHECKED, note=f"not committed, because the verdict is {verdict.value}") for item in self.staged)
         self.staged.clear()
-        self.result = InfiniteResultCard(name=self.card.name, key=self.key, status=status, verdict=verdict, summary=summary, review=review, entries=tuple(self.entries), dropped=tuple(self.dropped), files=tuple(dict.fromkeys(files)))
+        # @intent a-dropped-entry-reads-as-before-on-the-card
+        # The card keeps one line per dropped entry in the exact words
+        # it had before drops became records, so parents, journals, and
+        # resumed runs read the same text.
+        dropped = tuple(f"{item.key} ({item.text}): {item.note}" for item in self.dropped)
+        self.result = InfiniteResultCard(name=self.card.name, key=self.key, status=status, verdict=verdict, summary=summary, review=review, entries=tuple(item.entry_id for item in self.committed), dropped=dropped, files=tuple(dict.fromkeys(files)))
         self.launch.journal.pair_finished(self.key, self.result)
+        self.launch.events.subagent_finished(self, self.result)
         return self.result
 
     @staticmethod

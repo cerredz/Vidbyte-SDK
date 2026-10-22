@@ -33,6 +33,9 @@ RELATED DOCS:
 TESTS:
     tests/test_jev_agent.py and tests/test_jev_run_brief.py.
     Configuration and runtime tests cover the exported enum namespace.
+    tests/features/codex_host/test_codex_host_helper_surface.py and
+    tests/features/codex_host/test_codex_host_packaging.py (the Codex*
+    export order).
 """
 
 from __future__ import annotations
@@ -46,16 +49,39 @@ from vidbyte.lib.enums.agent_swarm import (
     AgentSwarmStopReason,
     AgentSwarmWebSearch,
 )
+from vidbyte.lib.enums.browser_tools import (
+    BrowserCapability,
+    BrowserKeyRequirement,
+    BrowserTool,
+    BrowserToolCallStatus,
+    BrowserToolExclusion,
+    BrowserToolTransport,
+    BrowserToolVariable,
+)
 from vidbyte.lib.enums.codex import (
+    CodexAccountKind,
     CodexApprovalMode,
+    CodexApprovalPolicy,
+    CodexApprovalsReviewer,
     CodexContextAnchor,
+    CodexGoalStatus,
+    CodexHostOperation,
     CodexInputType,
     CodexPersonality,
     CodexReasoningEffort,
     CodexReasoningSummary,
+    CodexReviewDelivery,
+    CodexReviewTargetKind,
     CodexSandbox,
+    CodexSandboxReadiness,
+    CodexSkillScope,
+    CodexSortDirection,
+    CodexThreadSortKey,
     CodexThreadSource,
+    CodexThreadSourceKind,
     CodexThreadStartSource,
+    CodexThreadStatus,
+    CodexTurnStatus,
 )
 from vidbyte.lib.enums.coding import CodingContextSection
 from vidbyte.lib.enums.config import AgentType, DocumentType
@@ -87,10 +113,14 @@ from vidbyte.lib.enums.failure import (
 )
 from vidbyte.lib.enums.infinite import (
     InfiniteAgentRole,
+    InfiniteDropReason,
     InfiniteEntryKind,
+    InfiniteEventKind,
+    InfiniteFileChange,
     InfiniteJournalEvent,
     InfiniteMemoryPreset,
     InfiniteResultStatus,
+    InfiniteStopCause,
     InfiniteVerdict,
 )
 from vidbyte.lib.enums.jev import (
@@ -125,16 +155,23 @@ from vidbyte.lib.enums.multi_agent import (
     TaskStatus,
 )
 from vidbyte.lib.enums.native_threads import (
+    GrokAgent,
+    GrokCommand,
+    GrokCommandFlag,
+    GrokEventType,
     GrokFlag,
     GrokPermissionMode,
     GrokReasoningEffort,
+    GrokThreadScope,
     MuseFlag,
     MuseMethod,
     MuseReasoningEffort,
+    MuseSkill,
     NativeEnvironmentVariable,
     NativeHarness,
     NativeThreadOperation,
     NativeThreadProblem,
+    NativeThreadResultRecord,
     NativeThreadVerb,
     OpencodeEventType,
     OpencodeFlag,
@@ -182,7 +219,7 @@ from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
-from vidbyte.lib.enums.text_model import TextModelMode
+from vidbyte.lib.enums.text_model import ReasoningEffort, TextModelMode
 from vidbyte.lib.enums.usage import UsageAccountingFailure, UsageKind
 
 __all__ = [
@@ -199,19 +236,40 @@ __all__ = [
     "AgentType",
     "AssumptionAction",
     "BasisType",
+    "BrowserCapability",
+    "BrowserKeyRequirement",
+    "BrowserTool",
+    "BrowserToolCallStatus",
+    "BrowserToolExclusion",
+    "BrowserToolTransport",
+    "BrowserToolVariable",
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
     "CliOptionStyle",
+    "CodexAccountKind",
     "CodexApprovalMode",
+    "CodexApprovalPolicy",
+    "CodexApprovalsReviewer",
     "CodexContextAnchor",
+    "CodexGoalStatus",
+    "CodexHostOperation",
     "CodexInputType",
     "CodexPersonality",
     "CodexReasoningEffort",
     "CodexReasoningSummary",
+    "CodexReviewDelivery",
+    "CodexReviewTargetKind",
     "CodexSandbox",
+    "CodexSandboxReadiness",
+    "CodexSkillScope",
+    "CodexSortDirection",
+    "CodexThreadSortKey",
     "CodexThreadSource",
+    "CodexThreadSourceKind",
     "CodexThreadStartSource",
+    "CodexThreadStatus",
+    "CodexTurnStatus",
     "CodingContextSection",
     "CompositionDivisionValidity",
     "ConsistencyStatus",
@@ -228,17 +286,26 @@ __all__ = [
     "FailureSeverity",
     "FailureStatus",
     "GitHeadState",
+    "GrokAgent",
+    "GrokCommand",
+    "GrokCommandFlag",
+    "GrokEventType",
     "GrokFlag",
     "GrokPermissionMode",
     "GrokReasoningEffort",
+    "GrokThreadScope",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
     "InfiniteAgentRole",
+    "InfiniteDropReason",
     "InfiniteEntryKind",
+    "InfiniteEventKind",
+    "InfiniteFileChange",
     "InfiniteJournalEvent",
     "InfiniteMemoryPreset",
     "InfiniteResultStatus",
+    "InfiniteStopCause",
     "InfiniteVerdict",
     "JevBoundaryKind",
     "JevClaimKind",
@@ -270,10 +337,12 @@ __all__ = [
     "MuseFlag",
     "MuseMethod",
     "MuseReasoningEffort",
+    "MuseSkill",
     "NativeEnvironmentVariable",
     "NativeHarness",
     "NativeThreadOperation",
     "NativeThreadProblem",
+    "NativeThreadResultRecord",
     "NativeThreadVerb",
     "NecessarySufficientVerdict",
     "OpencodeEventType",
@@ -292,6 +361,7 @@ __all__ = [
     "Prompt",
     "QuantifierKind",
     "QuantifierVerdict",
+    "ReasoningEffort",
     "ReasoningStrategyEnum",
     "RegressStyle",
     "ReturnableOption",

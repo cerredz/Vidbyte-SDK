@@ -8,6 +8,7 @@ from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider, StructuredOutputSupport
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.reasoning_effort import ReasoningEffortRegistry
 from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.util import PromptPlacement
@@ -62,6 +63,11 @@ class OpenAICompatibleProvider:
         self._attach_tools(payload, config)
         self._attach_response_format(payload, config)
         self._attach_metadata(payload, config, metadata)
+        # @intent reasoning-effort-joins-before-extra-body
+        # The effort's fragment merges after every step that sets a
+        # top-level key, so none of them overwrites it; an extra_body
+        # that overlaps the fragment was refused at construction.
+        ReasoningEffortRegistry.attach(payload, provider=config.normalized_provider(), model=config.model, effort=config.reasoning_effort)
         self._attach_extra_body(payload, config)
         return payload
 

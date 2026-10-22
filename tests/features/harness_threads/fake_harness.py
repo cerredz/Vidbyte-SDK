@@ -1,19 +1,21 @@
 """FILE: tests/features/harness_threads/fake_harness.py
 
-PURPOSE: A standard-library stand-in for the three vendor CLIs the harness thread functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`) and for `wsl.exe`, scripted by a JSON scenario file and logging what each process received.
-ROLE IN CODEBASE: Run as a real child process by the harness_threads tests and never imported. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
-ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME keyed by --cwd, as Grok does; opencode and Muse under the scenario's state folder), so continue and fork behave like the vendors.
-FUNCTION INVENTORY: main dispatches on the scenario's program; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6).
-COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on.
+PURPOSE: A standard-library stand-in for the three vendor CLIs the harness thread functions, thread helpers and skill functions drive (`grok --single`, `opencode run --format json`, `muse exec --json` and batch `muse serve`), for `wsl.exe`, and (through fake_browser.py) for `node`, scripted by a JSON scenario file and logging what each process received. The helper and skill paths (grok streaming-json, export and sessions delete; opencode session list, db, export, session delete and --command; muse session/list, session/read items, export and init) live in the sibling fake_harness_helpers.py. On the browser path it reads the compiled mount the way each vendor does and starts the servers it names: opencode's `mcp` and `permission` members, Grok's `--agent` file with repeated `--allow`/`--deny` and `--output-format=streaming-json`, and Muse's `settings.json` with `--disable-web-tools`.
+ROLE IN CODEBASE: Run as a real child process by the harness_threads tests; conftest.py loads it by path only to read CREDENTIAL_NAMES, which the sandbox fixture clears from the test process's environment. The tests hand it to the SDK through GrokThreadConfig.grok_command, OpencodeThreadConfig.opencode_command and MuseThreadConfig.muse_command (spec §13 "Real seams"), or put an `.exe`/script stand-in that runs it first on PATH.
+ARCHITECTURE NOTE: argv[1] is the scenario path; everything after it is what the SDK appended. fake_harness_helpers.py is loaded by file path (so the runpy-based `.exe` stand-ins find it too) and receives this module's helpers as `base`. A stand-in built for `wsl.exe` inserts `--as-wsl` first, and the muse role then sees only the variables that WSLENV names, as the real wsl.exe forwards. Each process logs to its own JSONL file named after its launch number, so logs read back in launch order and never interleave. Credentials are logged as a SHA-256 digest and a length, never as values. Threads persist as files (Grok under GROK_HOME in its real layout `sessions/<url-encoded cwd>/<id>/summary.json`; opencode in a SQLite `session` table plus a transcript file, and Muse as session metadata with items, both under the scenario's state folder), so continue, fork and every thread helper see what the runs wrote.
+FUNCTION INVENTORY: main dispatches on the scenario's program; load_helpers loads the sibling module and base hands it this module's helpers; run_grok, run_opencode, run_muse_exec, run_muse_serve and run_wsl play one program each; load_browser imports the browser half (fake_browser.py); grok_rules collects the repeated --allow and --deny values; grok_stream prints a browser call's streaming-json run; FakeLog writes the per-process log; start_record captures argv, cwd, stdin kind, credential digests, plain variables and skill folders; hold waits for the release file or the hold limit; flood writes past an output cap; echo_text builds the AC-4 secret echo; early_stderr prints the scenario's stderr_text before any mode runs (R-6).
+COMMON MODIFICATION PATTERNS: Add a scenario field, read it here with .get and a default, and log anything a test must assert on. Browser behaviour (servers, permissions, tool calls) belongs in fake_browser.py; this file only calls its mount readers.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import vidbyte or anything outside the standard library. 2. Do not contact the network or run a real vendor CLI or the real wsl.exe. 3. Do not log a credential value; only echo_secrets mode prints one, on purpose, into the vendor's own error output. 4. Never use shell=True.
 KNOWN EDGE CASES: A held process exits by itself after HOLD_LIMIT_SECONDS, so a broken stop cannot leak it for long; its grandchild sleeps GRANDCHILD_SECONDS. opencode reads stdin as bytes and decodes UTF-8 (the Windows console code page is not UTF-8). `muse exec --session-id <unknown>` silently starts a new thread, as Muse 1.0.1 does (spec §15, probe 9).
-RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §9.2, §13, §15
+RELATED DOCS: tests/features/harness_threads/FEATURE.md; docs/spec/harness-thread-functions/spec.md §9.2, §13, §15; docs/spec/harness-thread-helpers-skills/spec.md §13
 TESTS: PYTHONPATH=$(pwd) python -m pytest -q tests/features/harness_threads
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib
+import importlib.util
 import json
 import os
 import re
@@ -24,6 +26,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 HOLD_LIMIT_SECONDS = 30.0
@@ -34,17 +37,44 @@ DEFAULT_FAIL_EXIT = 93
 CREDENTIAL_NAMES = ("XAI_API_KEY", "GROK_CODE_XAI_API_KEY", "META_API_KEY", "DEEPSEEK_API_KEY", "ZAI_API_KEY", "OPENCODE_CONFIG_CONTENT")
 PLAIN_NAMES = (
     "GROK_HOME", "GROK_DISABLE_AUTOUPDATER", "OPENCODE_DISABLE_AUTOUPDATE", "MUSE_NO_AUTO_UPDATE",
-    "XDG_CONFIG_HOME", "MUSE_AUTH_PATH", "WSLENV", "VIDBYTE_PEER_MARK",
+    "XDG_CONFIG_HOME", "MUSE_AUTH_PATH", "WSLENV", "VIDBYTE_PEER_MARK", "GROK_WORKFLOWS", "PWD",
 )
-GROK_SWITCHES = ("--fork-session",)
+GROK_SWITCHES = ("--fork-session", "--disable-web-search")
+GROK_REPEATED = ("--allow", "--deny")
+GROK_OUTPUT_FORMATS = ("json", "streaming-json")
+BROWSER_PLAIN_NAMES = ("GROK_CLAUDE_MCPS_ENABLED", "GROK_CURSOR_MCPS_ENABLED")
 OPENCODE_SWITCHES = ("--fork",)
 MUSE_VALUED = ("--provider", "--workspace", "--session-id", "--model", "--reasoning-effort")
-MUSE_SWITCHES = ("--json", "--user-input-auto-resolve")
+MUSE_SWITCHES = ("--json", "--user-input-auto-resolve", "--disable-web-tools")
 SERVE_STATE = {"initialized": False}
 UUID7_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 WSL_DISTRO_NOT_FOUND = "There is no distribution with the supplied name.\nError code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\n"
 GROK_NOT_SIGNED_IN = "Not signed in. Run `grok login` or set XAI_API_KEY."
 MUSE_KEY_REJECTED = "Error: failed to fetch model catalog: authentication failed: your API key from META_API_KEY was rejected\n"
+HELPERS: Any = None
+
+
+def load_helpers() -> Any:
+    # The sibling module with the helper and skill paths, loaded by
+    # path so the runpy-based `.exe` stand-ins find it as well.
+    path = Path(__file__).resolve().parent / "fake_harness_helpers.py"
+    spec = importlib.util.spec_from_file_location("fake_harness_helpers", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def base() -> SimpleNamespace:
+    return SimpleNamespace(**globals())
+
+
+def load_browser() -> Any:
+    # fake_browser.py sits beside this file; a stand-in runs this file
+    # through runpy, which does not put its folder on sys.path.
+    folder = str(Path(__file__).resolve().parent)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    return importlib.import_module("fake_browser")
 
 
 def digest(value: str) -> dict[str, Any]:
@@ -140,22 +170,15 @@ def skill_listing(folder: Path | None) -> dict[str, Any] | None:
 
 
 def sanitized_config(raw: str | None) -> Any:
-    # OPENCODE_CONFIG_CONTENT with every apiKey replaced by its digest.
+    # OPENCODE_CONFIG_CONTENT with every apiKey, Authorization header
+    # and tool key variable replaced by its digest.
     if raw is None:
         return None
     try:
         data = json.loads(raw)
     except ValueError:
         return {"unparsed": digest(raw)}
-
-    def walk(node: Any) -> Any:
-        if isinstance(node, dict):
-            return {key: (digest(value) if key == "apiKey" and isinstance(value, str) else walk(value)) for key, value in node.items()}
-        if isinstance(node, list):
-            return [walk(value) for value in node]
-        return node
-
-    return walk(data)
+    return load_browser().sanitize(data)
 
 
 def start_record(log: FakeLog, role: str, args: list[str], env: dict[str, str], *, via_wsl: bool, skills_folder: Path | None, extra: dict[str, Any] | None = None) -> None:
@@ -169,6 +192,8 @@ def start_record(log: FakeLog, role: str, args: list[str], env: dict[str, str], 
         cwd=os.getcwd(),
         stdin_kind=stdin_kind(),
         credentials=credentials,
+        tool_credentials=load_browser().key_digests(env),
+        browser_env={name: env.get(name) for name in BROWSER_PLAIN_NAMES},
         plain=plain,
         raw_wslenv=os.environ.get("WSLENV"),
         opencode_config=sanitized_config(env.get("OPENCODE_CONFIG_CONTENT")),
@@ -240,7 +265,8 @@ def echo_text(scenario: dict[str, Any], args: list[str], stdin_text: str, env: d
     # capping before scrubbing would leave a fragment of the key behind.
     key = scenario["echo_key"]
     cap = scenario.get("echo_cap", 1000)
-    head = f"echo key {key} argv {' '.join(args)} stdin {stdin_text} env {' '.join(env.get(name, '') for name in CREDENTIAL_NAMES)} "
+    names = (*CREDENTIAL_NAMES, *scenario.get("echo_names", []))
+    head = f"echo key {key} argv {' '.join(args)} stdin {stdin_text} env {' '.join(env.get(name, '') for name in names)} "
     filler = "x" * max(0, cap - 100 - len(head))
     return head + filler + key * 6
 
@@ -260,26 +286,77 @@ def parse_joined(args: list[str], switches: tuple[str, ...]) -> tuple[dict[str, 
     return options, present, stray
 
 
+def grok_rules(args: list[str]) -> dict[str, list[str]]:
+    # Every value of the repeated --allow= and --deny= options, in
+    # order.
+    rules: dict[str, list[str]] = {"allow": [], "deny": []}
+    for element in args:
+        flag, _, value = element.partition("=")
+        if flag in GROK_REPEATED and value:
+            rules[flag[2:]].append(value)
+    return rules
+
+
+def grok_stream(mount: Any, scenario: dict[str, Any], session: str, prompt: str, text: str, cwd_value: str) -> str:
+    # --output-format=streaming-json: the connected tools, a first text
+    # run, the tool calls, the answer in two chunks, then `end`
+    # (vendor facts §2).
+    events, stop = mount.events(prompt) if mount is not None else ([], "end_turn")
+    for event in events[:1]:
+        write_out(json.dumps(event) + "\n")
+    write_out(json.dumps({"type": "text", "data": "Let me look at that first."}) + "\n")
+    write_out(json.dumps({"type": "usage", "inputTokens": 12, "outputTokens": 6}) + "\n")
+    for event in events[1:]:
+        write_out(json.dumps(event) + "\n")
+    if stop != "cancelled":
+        half = len(text) // 2
+        write_out(json.dumps({"type": "text", "data": text[:half]}) + "\n")
+        write_out(json.dumps({"type": "text", "data": text[half:]}) + "\n")
+        write_out(json.dumps({"type": "usage", "inputTokens": 30, "outputTokens": 9}) + "\n")
+    end: dict[str, Any] = {"type": "end", "stopReason": stop, "sessionId": session, "requestId": "req-0001", "cwd": cwd_value, "usage": {}, "num_turns": 1, "modelUsage": {}}
+    if scenario.get("mode") == "missing_session":
+        end.pop("sessionId")
+    write_out(json.dumps(end) + "\n")
+    return stop
+
+
 def new_id(prefix: str = "") -> str:
     return prefix + str(uuid.uuid4())
 
 
 def run_grok(scenario: dict[str, Any], args: list[str]) -> None:
+    if args[:1] == ["export"] or args[:2] == ["sessions", "delete"]:
+        HELPERS.run_grok_store_command(base(), scenario, args)
     env = dict(os.environ)
     options, switches, stray = parse_joined(args, GROK_SWITCHES)
+    rules = grok_rules(args)
     home = env.get("GROK_HOME")
     log = FakeLog(scenario["log_dir"], "grok")
-    start_record(log, "grok", args, env, via_wsl=False, skills_folder=None if home is None else Path(home) / "skills", extra={"options": options, "switches": switches, "stray": stray})
+    start_record(log, "grok", args, env, via_wsl=False, skills_folder=None if home is None else Path(home) / "skills", extra={"options": options, "switches": switches, "stray": stray, "rules": rules})
     mode = scenario.get("mode", "ok")
     if scenario.get("grandchild"):
         start_grandchild(log)
     early_stderr(scenario)
-    if stray or "--single" not in options:
-        write_err(f"fake grok: unexpected arguments {stray!r}; a --single=<prompt> option is required\n")
+    if stray or "--single" not in options or options.get("--output-format") not in GROK_OUTPUT_FORMATS:
+        write_err(f"fake grok: unexpected arguments {stray!r}; a --single=<prompt> option and a known --output-format are required\n")
         sys.exit(2)
     if home is None:
         write_out(json.dumps({"type": "error", "message": "fake grok: GROK_HOME is not set"}) + "\n")
         sys.exit(4)
+    if options.get("--output-format") == HELPERS.GROK_STREAMING and "--session-id" in options:
+        # A command run: the SDK mints its --session-id. A browser call
+        # streams too, but names no session id and goes on below.
+        HELPERS.run_grok_stream(base(), scenario, options, env, log, Path(home))
+    mount = None
+    if "--agent" in options:
+        # The per-call agent file's servers start before the first
+        # model request.
+        mount = load_browser().GrokMount(scenario, log, options["--agent"], rules, env, options.get("--cwd", os.getcwd()))
+        if mount.problem is not None:
+            write_err("Error: " + mount.problem + "\n")
+            sys.exit(1)
+        if scenario.get("hold_after_mount"):
+            log.write("held", outcome=hold(scenario))
     if mode == "hold":
         log.write("held", outcome=hold(scenario))
     if mode == "key_rejected" or "XAI_API_KEY" not in env:
@@ -303,10 +380,9 @@ def run_grok(scenario: dict[str, Any], args: list[str]) -> None:
         sys.exit(1)
     prompt = options["--single"]
     cwd_value = options.get("--cwd", os.getcwd())
-    store = Path(home) / "sessions" / hashlib.sha256(os.path.normcase(os.path.abspath(cwd_value)).encode("utf-8")).hexdigest()[:16]
     resume = options.get("--resume")
     forking = "--fork-session" in switches
-    if resume is not None and not (store / f"{resume}.json").is_file():
+    if resume is not None and HELPERS.grok_find(Path(home), resume) is None:
         write_out(json.dumps({"type": "error", "message": f"Session {resume} does not exist"}) + "\n")
         sys.exit(1)
     if resume is not None and not forking:
@@ -316,9 +392,12 @@ def run_grok(scenario: dict[str, Any], args: list[str]) -> None:
     else:
         session = new_id()
     log.write("session", session=session)
-    store.mkdir(parents=True, exist_ok=True)
-    (store / f"{session}.json").write_text(json.dumps({"cwd": cwd_value, "last_prompt": prompt}), encoding="utf-8")
     text = "g" * scenario["text_chars"] if mode == "long_text" else scenario.get("text", f"grok answer to: {prompt}")
+    HELPERS.grok_record(Path(home), cwd_value, session, scenario, line=prompt, text=text, model=options.get("--model"), parent=resume if forking else None, agent=None)
+    if options["--output-format"] == "streaming-json":
+        stop = grok_stream(mount, scenario, session, prompt, text, cwd_value)
+        log.write("answer", session=session, text_chars=len(text), resumed=resume, forked=forking, stop=stop)
+        sys.exit(0)
     answer: dict[str, Any] = {"text": text, "sessionId": session, "stopReason": "end_turn", "requestId": "req-0001"}
     if mode == "missing_session":
         answer.pop("sessionId")
@@ -344,6 +423,8 @@ def opencode_error(session: str, name: str, message: str, status: int | None) ->
 
 
 def run_opencode(scenario: dict[str, Any], args: list[str]) -> None:
+    if args[:2] in (["session", "list"], ["session", "delete"]) or args[:1] in (["db"], ["export"]):
+        HELPERS.run_opencode_helper(base(), scenario, args)
     env = dict(os.environ)
     log = FakeLog(scenario["log_dir"], "opencode")
     kind = stdin_kind()
@@ -359,8 +440,12 @@ def run_opencode(scenario: dict[str, Any], args: list[str]) -> None:
     if args[:1] != ["run"] or stray:
         write_err(f"fake opencode: expected `run` and --flag=value options, got {args!r}\n")
         sys.exit(2)
-    if not stdin_text.strip():
+    if not stdin_text.strip() and "--command" not in options:
         write_err("Error: You must provide a message or a command\n")
+        sys.exit(1)
+    mount = load_browser().OpencodeMount.start(scenario, log, env, os.getcwd())
+    if mount is not None and mount.problem is not None:
+        write_err("Error: " + mount.problem + "\n")
         sys.exit(1)
     state = Path(scenario["state_dir"]) / "opencode"
     state.mkdir(parents=True, exist_ok=True)
@@ -377,6 +462,8 @@ def run_opencode(scenario: dict[str, Any], args: list[str]) -> None:
         session = new_id("ses_")
     (state / session).write_text(stdin_text, encoding="utf-8")
     log.write("session", session=session)
+    HELPERS.opencode_record(scenario, session, options.get("--dir", os.getcwd()), stdin_text or options.get("--command", ""), new=session != requested)
+    HELPERS.opencode_command_refusal(base(), scenario, session, options)
     provider = options.get("--model", "").split("/", 1)[0]
     bound = isinstance(config, dict) and isinstance(config.get("provider", {}).get(provider, {}).get("options", {}).get("apiKey"), dict)
     if mode in ("session_then_hold", "session_then_flood", "hold"):
@@ -407,11 +494,14 @@ def run_opencode(scenario: dict[str, Any], args: list[str]) -> None:
     if mode == "stderr_exit":
         write_err(scenario["vendor_text"] + "\n")
         sys.exit(scenario.get("exit_code", DEFAULT_FAIL_EXIT))
-    parts = ["o" * scenario["text_chars"]] if mode == "long_text" else scenario.get("final_parts", [f"opencode answer to: {stdin_text}"])
+    answer = f"opencode ran /{options['--command']} with: {stdin_text}" if "--command" in options else f"opencode answer to: {stdin_text}"
+    parts = ["o" * scenario["text_chars"]] if mode == "long_text" else scenario.get("final_parts", [answer])
     write_out("opencode: loading plugins\n")
     write_out(opencode_event("step_start", session, 1, part={"type": "step-start", "messageID": "msg_0001"}))
     write_out(opencode_text(session, 2, "msg_0001", "Let me look at the files first."))
     write_out(opencode_event("tool_use", session, 3, part={"type": "tool", "messageID": "msg_0001", "tool": "read"}))
+    for index, (tool, status) in enumerate(mount.run(stdin_text) if mount is not None else []):
+        write_out(opencode_event("tool_use", session, 3, part={"type": "tool", "messageID": "msg_0001", "callID": f"call_{index:04d}", "tool": tool, "state": {"status": status, "input": {}, "output": f"fake output of {tool}"}}))
     write_out(opencode_event("step_start", session, 4, part={"type": "step-start", "messageID": "msg_0002"}))
     for index, part in enumerate(parts):
         write_out(opencode_text(session, 5 + index, "msg_0002", part))
@@ -472,6 +562,10 @@ def run_muse_exec(scenario: dict[str, Any], args: list[str], env: dict[str, str]
     if problem is not None:
         write_err(problem + "\n")
         sys.exit(2)
+    mount = load_browser().MuseMount.start(scenario, log, xdg, env, host_path(options.get("--workspace"), via_wsl))
+    if mount is not None and mount.fatal is not None:
+        write_err("Error: " + mount.fatal + "\n")
+        sys.exit(1)
     state = Path(scenario["state_dir"]) / "muse"
     state.mkdir(parents=True, exist_ok=True)
     requested = options.get("--session-id")
@@ -506,11 +600,17 @@ def run_muse_exec(scenario: dict[str, Any], args: list[str], env: dict[str, str]
         sys.exit(1)
     (state / session).write_text(operands[0], encoding="utf-8")
     text = "m" * scenario["text_chars"] if mode == "long_text" else scenario.get("text", f"muse answer to: {operands[0]}")
+    HELPERS.muse_after_exec(scenario, options, session, operands[0], text)
     write_out("Muse Code 1.0.1 (headless)\n")
     write_out(muse_record("run", run_stream, "run.started", {"command_id": new_id()}))
+    if mount is not None and mount.failed is not None:
+        write_out(muse_record("run", run_stream, "run.terminal.failed", {"kind": "run_terminal", "terminal": "failed", "text": None, "reason": mount.failed, "run_stream": {"id": run_stream, "kind": "run"}}))
+        sys.exit(1)
     if mode != "no_session":
         write_out(muse_record("session", session, "session.turn.started", {}))
         write_out(muse_record("session", session, "task.lifecycle.failed", {"reason": "an optional subtask was skipped"}))
+        for payload_type, payload in mount.records(operands[0]) if mount is not None else []:
+            write_out(muse_record("session", session, payload_type, payload))
     if mode == "no_terminal":
         sys.exit(0)
     if mode == "terminal_failed":
@@ -543,14 +643,19 @@ def serve_answer(scenario: dict[str, Any], frame: dict[str, Any], state: Path, l
     if scenario.get("serve_mode") == "other_error":
         reply["error"] = {"code": -32603, "message": "internal: the session store is locked by another process", "data": {"kind": "internal"}}
         return reply
-    if params.get("excludeItems") is not True or not isinstance(source, str):
+    if method == "session/list":
+        return HELPERS.muse_list(scenario, params, reply)
+    # session/read takes excludeItems true or false; fork keeps the
+    # #1036 guard (excludeItems true).
+    reads = method == "session/read" and isinstance(params.get("excludeItems"), bool)
+    if not isinstance(source, str) or not (reads or params.get("excludeItems") is True):
         reply["error"] = {"code": -32602, "message": "sessionId and excludeItems are required", "data": {"kind": "invalidParams"}}
         return reply
-    if not (state / source).is_file():
+    if not (state / source).is_file() or scenario.get("serve_mode") == "not_found":
         reply["error"] = {"code": -32020, "message": f"session {source} not found", "data": {"kind": "sessionNotFound"}}
         return reply
     if method == "session/read":
-        reply["result"] = {"session": {"sessionId": source, "status": "notLoaded"}}
+        reply["result"] = HELPERS.muse_read(scenario, source, params["excludeItems"])
         return reply
     if method == "session/fork":
         if not isinstance(params.get("commandId"), str) or UUID7_PATTERN.fullmatch(params["commandId"]) is None:
@@ -559,7 +664,10 @@ def serve_answer(scenario: dict[str, Any], frame: dict[str, Any], state: Path, l
         forked = source if scenario.get("serve_mode") == "fork_returns_source" else new_id()
         (state / forked).write_text((state / source).read_text(encoding="utf-8"), encoding="utf-8")
         log.write("forked", source=source, session=forked)
-        reply["result"] = {"session": {"sessionId": forked, "forkedFrom": source, "status": "notLoaded"}}
+        if forked != source:
+            HELPERS.muse_after_fork(scenario, source, forked, params["commandId"])
+        provenance = {"commandId": params["commandId"], "cutCursor": "cut-0001", "cutExplicit": False, "sessionId": source}
+        reply["result"] = {"session": {"sessionId": forked, "forkedFrom": provenance, "status": "notLoaded"}}
         return reply
     reply["error"] = {"code": -32601, "message": f"method {method} not found", "data": {"kind": "methodNotFound"}}
     return reply
@@ -607,6 +715,10 @@ def run_muse(scenario: dict[str, Any], args: list[str], *, via_wsl: bool, launch
         run_muse_exec(scenario, args, env, via_wsl, launcher_args)
     if args[:1] == ["serve"]:
         run_muse_serve(scenario, args, env, via_wsl, launcher_args)
+    if args[:1] == ["export"]:
+        HELPERS.run_muse_export(base(), scenario, args, env, via_wsl, launcher_args)
+    if args[:1] == ["init"]:
+        HELPERS.run_muse_init(base(), scenario, args, env, via_wsl, launcher_args)
     log = FakeLog(scenario["log_dir"], "muse-unknown")
     log.write("start", role="muse-unknown", argv=args)
     write_err(f"fake muse: unknown command {args!r}\n")
@@ -664,11 +776,15 @@ def run_wsl(scenario: dict[str, Any], args: list[str]) -> None:
 
 
 def main() -> None:
+    global HELPERS
+    HELPERS = load_helpers()
     scenario = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     args = sys.argv[2:]
     if args[:1] == ["--as-wsl"]:
         run_wsl(scenario, args[1:])
     program = scenario["program"]
+    if program == "node":
+        load_browser().run_node(scenario, args, FakeLog)
     if program == "grok":
         run_grok(scenario, args)
     if program == "opencode":

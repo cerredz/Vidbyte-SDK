@@ -9,7 +9,8 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, AgentSwarm, AgentSwarmSettings, AgentSwarmMember, AgentSwarmEventKind, AgentSwarmStopReason, AgentSwarmWebSearch, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, CodingAgent, CodingAgentSettings, CodingAgentTools, InfiniteMemoryAgent, InfiniteMemoryAgentSettings, InfiniteWorkspaceSettings, InfiniteMemoryPreset, InfiniteEvent, InfiniteEventKind, InfiniteHandoff, AgentSwarm, AgentSwarmSettings, AgentSwarmMember, AgentSwarmEventKind, AgentSwarmStopReason, AgentSwarmWebSearch, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent setting exports: AgentLoopSettings (loop limits), PermissionPolicy (which ToolPermission levels tools may use), TextModelMode (gateway or direct text calls) and ReasoningEffort (the provider-neutral reasoning effort a DIRECT text call sends), which BaseAgent and JevAgentSettings take, plus JevDynamicComputeOption, the values of JevComputeSettings.dynamic_compute, and DecisionModelConfig with its DecisionModelMode, the decision-model record JevRuntimeSettings.decision holds, so a caller limited to root names, such as vidbyte-cli, can set JevAgent's loop, permission, text-mode, reasoning-effort, compute and decision-model options.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
@@ -19,9 +20,10 @@ Architecture:
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
     - Output exports: OutputConnector, OutputDispatcher (sends any AgentMessage to a list of connectors), the sixteen destination connectors (SlackOutput through HubSpotTaskOutput) and TypefullyPlatform, and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
+    - Native harness thread exports: everything in vidbyte.harnesses.native.__all__, which is the nine run_/continue_/fork_ thread functions for Grok, opencode and Muse, their nine *_with_browser counterparts, the 22 keyless thread helpers, init_muse_workspace and the 24 command and skill functions, plus NativeThreadResult, NativeThreadSummary, NativeCommandOutput, BrowserThreadResult, BrowserToolCall, NativeThreadError, GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokThreadScope and GrokCommand. The records, enums and error import eagerly from vidbyte.lib. The functions load on first use through _LAZY_NATIVE_THREAD_EXPORTS and __getattr__, so `import vidbyte` never imports vidbyte.harnesses.native (harness thread spec INV-23). A new name in vidbyte.harnesses.native.__all__ joins that mapping (functions) or the vidbyte.lib imports (records, enums, errors) and this __all__, and then contracts/sdk-public-api.json is regenerated.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
-    - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families.
+    - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families, plus the general ConfigurationError raised for invalid configuration.
 Key Functions / Exports:
     - VidbyteSDK: Main SDK entry point.
     - BaseAgent: Base class for building agents.
@@ -37,7 +39,9 @@ Similar files:
 
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
+
+import typing as _typing
 
 from vidbyte.agents import (
     Agent,
@@ -47,6 +51,7 @@ from vidbyte.agents import (
     AgentDispatch,
     AgentForkSettings,
     AgentInput,
+    AgentLoopSettings,
     AgentMessage,
     AgentRegistry,
     AgentReport,
@@ -105,6 +110,9 @@ from vidbyte.agents import (
     FinalizationContext,
     GitHubSkill,
     HandoffAgent,
+    InfiniteEvent,
+    InfiniteEventKind,
+    InfiniteHandoff,
     InfiniteMemoryAgent,
     InfiniteMemoryAgentSettings,
     InfiniteWorkspaceSettings,
@@ -304,6 +312,7 @@ from vidbyte.agents.output import (
     WebhookOutput,
 )
 from vidbyte.agents.pricing import ProviderUsage
+from vidbyte.agents.skills.loader import SkillLoader
 from vidbyte.client import VidbyteSDK
 from vidbyte.config import (
     AgentSettings,
@@ -444,12 +453,22 @@ from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.agent_swarm import AgentSwarmMember
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
+from vidbyte.lib.dataclasses.browser_tools import BrowserThreadResult, BrowserToolCall
 from vidbyte.lib.dataclasses.coding import CodingAgentSettings
 from vidbyte.lib.dataclasses.continual_trace_descriptor import (
     ContinualTraceAgentDescriptor,
 )
 from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
+from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
+from vidbyte.lib.dataclasses.native_threads import (
+    GrokThreadConfig,
+    MuseThreadConfig,
+    NativeCommandOutput,
+    NativeThreadResult,
+    NativeThreadSummary,
+    OpencodeThreadConfig,
+)
 from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     AllegationRecord,
     AllegationSeverity,
@@ -470,21 +489,33 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorDefenderJudgeReport,
     ProsecutorReportPayload,
 )
+from vidbyte.lib.dataclasses.security import PermissionPolicy
+from vidbyte.lib.dataclasses.skills import SkillResolution
 from vidbyte.lib.enums import (
     AgentSwarmEventKind,
     AgentSwarmStopReason,
     AgentSwarmWebSearch,
     BudgetPreset,
+    DecisionModelMode,
+    GrokCommand,
+    GrokPermissionMode,
+    GrokReasoningEffort,
+    GrokThreadScope,
     InfiniteMemoryPreset,
+    JevDynamicComputeOption,
+    MuseReasoningEffort,
     PermissionPreset,
     Prompt,
+    ReasoningEffort,
     StructuredOutputSupport,
     SystemPromptPreset,
+    TextModelMode,
 )
 from vidbyte.lib.enums.config import AgentType
 from vidbyte.lib.errors import (
     AgentTransferError,
     CodexAgentError,
+    ConfigurationError,
     McpAttachmentError,
     McpConnectionError,
     McpError,
@@ -492,6 +523,7 @@ from vidbyte.lib.errors import (
     McpToolDiscoveryError,
     McpToolExecutionError,
     MultiAgentExecutionError,
+    NativeThreadError,
     OutputSchemaViolationError,
     PipelineExecutionError,
     TaskLedgerError,
@@ -734,6 +766,77 @@ from vidbyte.workflows import (
     WorkflowValidationError,
 )
 
+if _typing.TYPE_CHECKING:
+    # Type checkers and editors see the real thread functions here;
+    # at runtime they load on first use through __getattr__ below.
+    from vidbyte.harnesses.native import (
+        continue_grok_thread,
+        continue_grok_with_browser,
+        continue_muse_thread,
+        continue_muse_with_browser,
+        continue_opencode_thread,
+        continue_opencode_with_browser,
+        delete_grok_thread,
+        delete_opencode_thread,
+        fork_grok_thread,
+        fork_grok_with_browser,
+        fork_muse_thread,
+        fork_muse_with_browser,
+        fork_opencode_thread,
+        fork_opencode_with_browser,
+        get_grok_thread,
+        get_grok_thread_lineage,
+        get_muse_thread,
+        get_muse_thread_lineage,
+        get_opencode_thread,
+        get_opencode_thread_lineage,
+        init_muse_workspace,
+        list_grok_threads,
+        list_grok_threads_since,
+        list_muse_threads,
+        list_muse_threads_since,
+        list_opencode_threads,
+        list_opencode_threads_since,
+        list_recent_grok_threads,
+        list_recent_muse_threads,
+        list_recent_opencode_threads,
+        read_grok_thread,
+        read_muse_thread,
+        read_opencode_thread,
+        run_grok_code_review,
+        run_grok_command,
+        run_grok_design,
+        run_grok_execute_plan,
+        run_grok_explore,
+        run_grok_goal,
+        run_grok_imagine,
+        run_grok_imagine_video,
+        run_grok_implement,
+        run_grok_plan,
+        run_grok_resume_claude,
+        run_grok_resume_codex,
+        run_grok_resume_cursor,
+        run_grok_review,
+        run_grok_thread,
+        run_grok_with_browser,
+        run_muse_browser_app,
+        run_muse_goal,
+        run_muse_import,
+        run_muse_plan,
+        run_muse_scaffold,
+        run_muse_skill,
+        run_muse_thread,
+        run_muse_with_browser,
+        run_opencode_command,
+        run_opencode_init,
+        run_opencode_plan,
+        run_opencode_review,
+        run_opencode_thread,
+        run_opencode_with_browser,
+        search_grok_threads,
+        search_opencode_threads,
+    )
+
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
     "AdversarialAgentDescriptor",
@@ -761,6 +864,9 @@ __all__ = [
     "CodingAgent",
     "CodingAgentSettings",
     "CodingAgentTools",
+    "InfiniteEvent",
+    "InfiniteEventKind",
+    "InfiniteHandoff",
     "InfiniteMemoryAgent",
     "InfiniteMemoryAgentSettings",
     "InfiniteMemoryPreset",
@@ -803,6 +909,7 @@ __all__ = [
     "JevDiscoveredItemBatch",
     "JevDiscoveredItemEvidence",
     "JevComputeSettings",
+    "JevDynamicComputeOption",
     "JevContinualSettings",
     "JevContinuationGate",
     "JevDeliverable",
@@ -895,6 +1002,9 @@ __all__ = [
     "SkillsShSkill",
     "SkillSourceType",
     "SkillUnavailableReason",
+    "SkillLoader",
+    "SkillResolution",
+    "ConfigurationError",
     "JevTargetOutcome",
     "JevTargetOutcomeEvidence",
     "JevTargetOutcomeEvidenceItem",
@@ -1029,6 +1139,11 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSpec",
     "AgentStopReason",
+    "AgentLoopSettings",
+    "TextModelMode",
+    "ReasoningEffort",
+    "DecisionModelConfig",
+    "DecisionModelMode",
     "ToolSettings",
     "ModelPricing",
     "ModelPricingRegistry",
@@ -1176,6 +1291,85 @@ __all__ = [
     "TrajectoryCollector",
     "TrajectoryRecord",
     "TrajectorySink",
+    "BrowserThreadResult",
+    "BrowserToolCall",
+    "GrokCommand",
+    "GrokPermissionMode",
+    "GrokReasoningEffort",
+    "GrokThreadConfig",
+    "GrokThreadScope",
+    "MuseReasoningEffort",
+    "MuseThreadConfig",
+    "NativeCommandOutput",
+    "NativeThreadError",
+    "NativeThreadResult",
+    "NativeThreadSummary",
+    "OpencodeThreadConfig",
+    "continue_grok_thread",
+    "continue_grok_with_browser",
+    "continue_muse_thread",
+    "continue_muse_with_browser",
+    "continue_opencode_thread",
+    "continue_opencode_with_browser",
+    "delete_grok_thread",
+    "delete_opencode_thread",
+    "fork_grok_thread",
+    "fork_grok_with_browser",
+    "fork_muse_thread",
+    "fork_muse_with_browser",
+    "fork_opencode_thread",
+    "fork_opencode_with_browser",
+    "get_grok_thread",
+    "get_grok_thread_lineage",
+    "get_muse_thread",
+    "get_muse_thread_lineage",
+    "get_opencode_thread",
+    "get_opencode_thread_lineage",
+    "init_muse_workspace",
+    "list_grok_threads",
+    "list_grok_threads_since",
+    "list_muse_threads",
+    "list_muse_threads_since",
+    "list_opencode_threads",
+    "list_opencode_threads_since",
+    "list_recent_grok_threads",
+    "list_recent_muse_threads",
+    "list_recent_opencode_threads",
+    "read_grok_thread",
+    "read_muse_thread",
+    "read_opencode_thread",
+    "run_grok_code_review",
+    "run_grok_command",
+    "run_grok_design",
+    "run_grok_execute_plan",
+    "run_grok_explore",
+    "run_grok_goal",
+    "run_grok_imagine",
+    "run_grok_imagine_video",
+    "run_grok_implement",
+    "run_grok_plan",
+    "run_grok_resume_claude",
+    "run_grok_resume_codex",
+    "run_grok_resume_cursor",
+    "run_grok_review",
+    "run_grok_thread",
+    "run_grok_with_browser",
+    "run_muse_browser_app",
+    "run_muse_goal",
+    "run_muse_import",
+    "run_muse_plan",
+    "run_muse_scaffold",
+    "run_muse_skill",
+    "run_muse_thread",
+    "run_muse_with_browser",
+    "run_opencode_command",
+    "run_opencode_init",
+    "run_opencode_plan",
+    "run_opencode_review",
+    "run_opencode_thread",
+    "run_opencode_with_browser",
+    "search_grok_threads",
+    "search_opencode_threads",
     "MemoryContextItem",
     "MinimalHandoff",
     "PlanContextItem",
@@ -1332,6 +1526,7 @@ __all__ = [
     "ToolExecutor",
     "ToolParameter",
     "ToolPermission",
+    "PermissionPolicy",
     "ToolRegistry",
     "ToolResult",
     "ToolSpec",
@@ -1386,3 +1581,99 @@ __all__ = [
     "tool",
     "vidbyte_tool",
 ]
+
+# @intent native-thread-functions-load-on-first-use
+# The harness thread spec (INV-23) promises that a plain
+# `import vidbyte` never imports vidbyte.harnesses.native, so these
+# functions stay out of the imports above and load the first time a
+# caller names one. Lint rule S015 reads this mapping's keys
+# as lazy exports; each value is the package they load from.
+_LAZY_NATIVE_THREAD_EXPORTS: dict[str, str] = {
+    "continue_grok_thread": "vidbyte.harnesses.native",
+    "continue_grok_with_browser": "vidbyte.harnesses.native",
+    "continue_muse_thread": "vidbyte.harnesses.native",
+    "continue_muse_with_browser": "vidbyte.harnesses.native",
+    "continue_opencode_thread": "vidbyte.harnesses.native",
+    "continue_opencode_with_browser": "vidbyte.harnesses.native",
+    "delete_grok_thread": "vidbyte.harnesses.native",
+    "delete_opencode_thread": "vidbyte.harnesses.native",
+    "fork_grok_thread": "vidbyte.harnesses.native",
+    "fork_grok_with_browser": "vidbyte.harnesses.native",
+    "fork_muse_thread": "vidbyte.harnesses.native",
+    "fork_muse_with_browser": "vidbyte.harnesses.native",
+    "fork_opencode_thread": "vidbyte.harnesses.native",
+    "fork_opencode_with_browser": "vidbyte.harnesses.native",
+    "get_grok_thread": "vidbyte.harnesses.native",
+    "get_grok_thread_lineage": "vidbyte.harnesses.native",
+    "get_muse_thread": "vidbyte.harnesses.native",
+    "get_muse_thread_lineage": "vidbyte.harnesses.native",
+    "get_opencode_thread": "vidbyte.harnesses.native",
+    "get_opencode_thread_lineage": "vidbyte.harnesses.native",
+    "init_muse_workspace": "vidbyte.harnesses.native",
+    "list_grok_threads": "vidbyte.harnesses.native",
+    "list_grok_threads_since": "vidbyte.harnesses.native",
+    "list_muse_threads": "vidbyte.harnesses.native",
+    "list_muse_threads_since": "vidbyte.harnesses.native",
+    "list_opencode_threads": "vidbyte.harnesses.native",
+    "list_opencode_threads_since": "vidbyte.harnesses.native",
+    "list_recent_grok_threads": "vidbyte.harnesses.native",
+    "list_recent_muse_threads": "vidbyte.harnesses.native",
+    "list_recent_opencode_threads": "vidbyte.harnesses.native",
+    "read_grok_thread": "vidbyte.harnesses.native",
+    "read_muse_thread": "vidbyte.harnesses.native",
+    "read_opencode_thread": "vidbyte.harnesses.native",
+    "run_grok_code_review": "vidbyte.harnesses.native",
+    "run_grok_command": "vidbyte.harnesses.native",
+    "run_grok_design": "vidbyte.harnesses.native",
+    "run_grok_execute_plan": "vidbyte.harnesses.native",
+    "run_grok_explore": "vidbyte.harnesses.native",
+    "run_grok_goal": "vidbyte.harnesses.native",
+    "run_grok_imagine": "vidbyte.harnesses.native",
+    "run_grok_imagine_video": "vidbyte.harnesses.native",
+    "run_grok_implement": "vidbyte.harnesses.native",
+    "run_grok_plan": "vidbyte.harnesses.native",
+    "run_grok_resume_claude": "vidbyte.harnesses.native",
+    "run_grok_resume_codex": "vidbyte.harnesses.native",
+    "run_grok_resume_cursor": "vidbyte.harnesses.native",
+    "run_grok_review": "vidbyte.harnesses.native",
+    "run_grok_thread": "vidbyte.harnesses.native",
+    "run_grok_with_browser": "vidbyte.harnesses.native",
+    "run_muse_browser_app": "vidbyte.harnesses.native",
+    "run_muse_goal": "vidbyte.harnesses.native",
+    "run_muse_import": "vidbyte.harnesses.native",
+    "run_muse_plan": "vidbyte.harnesses.native",
+    "run_muse_scaffold": "vidbyte.harnesses.native",
+    "run_muse_skill": "vidbyte.harnesses.native",
+    "run_muse_thread": "vidbyte.harnesses.native",
+    "run_muse_with_browser": "vidbyte.harnesses.native",
+    "run_opencode_command": "vidbyte.harnesses.native",
+    "run_opencode_init": "vidbyte.harnesses.native",
+    "run_opencode_plan": "vidbyte.harnesses.native",
+    "run_opencode_review": "vidbyte.harnesses.native",
+    "run_opencode_thread": "vidbyte.harnesses.native",
+    "run_opencode_with_browser": "vidbyte.harnesses.native",
+    "search_grok_threads": "vidbyte.harnesses.native",
+    "search_opencode_threads": "vidbyte.harnesses.native",
+}
+
+# Type checkers never see these two hooks, so a misspelled root name
+# is still reported as missing instead of being typed as `object`.
+if not _typing.TYPE_CHECKING:
+
+    def __getattr__(name: str) -> object:
+        # Anything outside the lazy mapping is genuinely missing.
+        if name not in _LAZY_NATIVE_THREAD_EXPORTS:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        # Import the native harness package on first use and hand
+        # back its own function object, not a wrapper.
+        from vidbyte.harnesses import native
+
+        value = getattr(native, name)
+        # Keep it on this module, so later lookups skip this hook.
+        globals()[name] = value
+        return value
+
+    def __dir__() -> list[str]:
+        # List the lazy functions before first use too, so dir()
+        # and editor completion show the whole root surface.
+        return sorted(set(globals()) | set(_LAZY_NATIVE_THREAD_EXPORTS))

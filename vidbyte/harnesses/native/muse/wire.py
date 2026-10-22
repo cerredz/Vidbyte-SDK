@@ -1,14 +1,14 @@
 """FILE: vidbyte/harnesses/native/muse/wire.py
 
-PURPOSE: Defines the two Muse codecs of one call: MuseWire speaks the batch `muse serve` exchange (MSP frames on stdin, the answer to request id 2 on stdout) that checks or forks a thread before exec runs, and MuseExecOutput reads the JSON records of one `muse exec --json` run into a NativeThreadResult, or into the NativeThreadError that names what went wrong.
-ROLE IN CODEBASE: Called by MuseThreadRun.execute in vidbyte/harnesses/native/muse/threads.py: MuseWire builds the serve stdin and reads its answer, MuseExecOutput reads the exec outcome. Both raise through the call's NativeErrorFactory (hostkit/errors.py).
-ARCHITECTURE NOTE: Two classes because writing an MSP batch and reading exec records are two jobs (spec D-17). Pure: no process, no file and no await. Every member name, request id and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, then the vendor's own answer.
-FUNCTION INVENTORY: MuseWire.new_command_id mints a UUIDv7; batch_frames joins the initialize request, the initialized notification and the session request; session_read_params and session_fork_params build the request parameters; read_answer is the narrated reader of the serve answer; _answer finds the line answering request id 2. MuseExecOutput.read is the narrated reader of exec records, read through CliRunner.json_objects; _session finds the first session stream id; _terminal finds the terminal record's payload.
+PURPOSE: Defines the Muse codecs: MuseWire speaks the batch `muse serve` exchange (MSP frames on stdin, the answer to request id 2 on stdout) that checks or forks a thread before exec runs; MuseExecOutput reads the JSON records of one `muse exec --json` run into a NativeThreadResult, or into the NativeThreadError that names what went wrong, and reads a browser call's mounted-tool calls from the same records; MuseSessionWire builds the session/list and session/read parameters of the thread helpers and the evidence read, and reads their answers into NativeThreadSummary records and tool calls.
+ROLE IN CODEBASE: Called by MuseThreadRun.execute in vidbyte/harnesses/native/muse/threads.py: MuseWire builds the serve stdin and reads its answer, MuseExecOutput reads the exec outcome; MuseBrowserHarness (muse/browser.py) calls MuseExecOutput.tool_calls on a browser call's outcome. MuseHelperRun (muse/helpers.py) builds its serve batches with MuseWire.batch_frames and the MuseSessionWire params, and reads them with MuseSessionWire. All raise through the call's NativeErrorFactory (hostkit/errors.py).
+ARCHITECTURE NOTE: Separate classes because writing the run's MSP batch, reading exec records and reading the helpers' session answers are three jobs (spec D-17). A Session is read strictly as msp.schema.json shapes it: forkedFrom is null or an object carrying sessionId, and a member the record refuses is protocol_mismatch naming the MSP member (spec INV-6). The history of a session/read with items comes in mode inline (history.items), snapshot (history.snapshot.state.items), anchoredSnapshot (after a compaction; MSP's full folded state, every item at the snapshot cursor in history.snapshot.state.items, read exactly like snapshot) or none (with noneReason). Only toolCall items are evidence; message text never counts (spec D-33). Pure: no process, no file and no await. Every member name, request id and marker comes from vidbyte/lib/constants/native_threads.py (spec INV-15). The checks run in the INV-6 order: timeout, output cap, then the vendor's own answer.
+FUNCTION INVENTORY: MuseWire.new_command_id mints a UUIDv7; batch_frames joins the initialize request, the initialized notification and the session request; session_read_params and session_fork_params build the request parameters; read_answer is the narrated reader of the serve answer; _answer finds the line answering request id 2. MuseExecOutput.read is the narrated reader of exec records, read through CliRunner.json_objects; tool_calls reads the mounted-tool calls of a browser call; _session finds the first session stream id; _terminal finds the terminal record's payload. MuseSessionWire.list_params and read_items_params build the request parameters; result reads the answer to request id 2 for one method; exited raises the problem NativeErrorFactory.child_problem finds in an export or init child's outcome (spec D-35); sessions and session read Session records into summaries; tool_calls reads the toolCall items of a history in every mode but none; _summary builds one summary, naming a refused member as MSP spells it.
 COMMON MODIFICATION PATTERNS: A new MSP request is one MuseMethod member and one params builder here; a new exec failure text is one more marker in MUSE_KEY_REJECTED_MARKERS or one more check in MuseExecOutput.read.
 WHAT NOT TO DO IN THIS FILE: 1. Do not copy vidbyte.__version__ at import time; batch_frames reads it on every call. 2. Do not send a commandId that is not from new_command_id. 3. Do not copy vendor text into an error unscrubbed; pass it as vendor_text and the factory scrubs and caps it.
-KNOWN EDGE CASES: `muse exec --session-id <unknown>` silently starts a new thread, so a continue checks the id with session/read first, and an exec whose session stream is not the id it was given is thread_not_found carrying the stream's id. A fork whose serve answer is its source id is protocol_mismatch before exec starts. The session stream id is looked for before the runner checks, so a timed-out or cut run still reports it (spec INV-5). Lines that are not JSON objects are skipped.
+KNOWN EDGE CASES: tool_calls pairs each proposed task or side-effect intent named mcp__<server>__<tool> with the completed or failed record of the same task_id (spec A-1), skips a name whose server is not mounted or whose tool part fails NATIVE_NAME_PATTERN (EC-44), and never raises. -32020 is thread_not_found, -32601 (an older Muse without the method) is protocol_mismatch naming the method, and any other JSON-RPC error is run_failed with Muse's message. History mode none means there are no items to check, so the evidence read fails closed naming noneReason (spec EC-56). `muse exec --session-id <unknown>` silently starts a new thread, so a continue checks the id with session/read first, and an exec whose session stream is not the id it was given is thread_not_found carrying the stream's id. A fork whose serve answer is its source id is protocol_mismatch before exec starts. The session stream id is looked for before the runner checks, so a timed-out or cut run still reports it (spec INV-5). Lines that are not JSON objects are skipped.
 RELATED DOCS: vidbyte/harnesses/README.md
-TESTS: tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_errors.py
+TESTS: tests/features/harness_threads/test_harness_threads_threads.py, tests/features/harness_threads/test_harness_threads_errors.py, tests/features/harness_threads/test_harness_threads_muse_helpers.py, tests/features/harness_threads/test_harness_threads_muse_commands.py, tests/features/harness_threads/test_harness_threads_browser_mounts.py, tests/features/harness_threads/test_harness_threads_browser_lifecycle.py
 """
 
 from __future__ import annotations
@@ -18,22 +18,36 @@ import secrets
 import time
 import uuid
 from collections.abc import Mapping
+from datetime import datetime
 
 import vidbyte
 from vidbyte.harnesses.native.hostkit import NativeErrorFactory
-from vidbyte.lib.constants import native_threads
+from vidbyte.lib.constants import browser_tools, native_threads
+from vidbyte.lib.dataclasses.browser_tools import (
+    BrowserMount,
+    BrowserToolCall,
+    BrowserToolCalls,
+)
 from vidbyte.lib.dataclasses.native_threads import (
+    NativeHelperRequest,
     NativeThreadRequest,
     NativeThreadResult,
+    NativeThreadSummary,
+    NativeToolCall,
 )
 from vidbyte.lib.dataclasses.process import CliOutcome
-from vidbyte.lib.dataclasses.validation import RecordFieldValidator
+from vidbyte.lib.dataclasses.validation import (
+    RecordFieldConverter,
+    RecordFieldValidator,
+)
+from vidbyte.lib.enums.browser_tools import BrowserToolCallStatus
 from vidbyte.lib.enums.native_threads import (
     MuseMethod,
     NativeHarness,
     NativeThreadProblem,
     NativeThreadVerb,
 )
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.process import CliRunner
 
 
@@ -135,7 +149,7 @@ class MuseWire:
 
 
 class MuseExecOutput:
-    """Reads the JSON records of one muse exec --json run."""
+    """Reads the JSON records of one muse exec --json run: the answer, and on a browser call the mounted-tool calls."""
 
     @staticmethod
     def read(outcome: CliOutcome, request: NativeThreadRequest, errors: NativeErrorFactory, *, thread_id: str | None, timeout_seconds: float) -> NativeThreadResult:
@@ -187,6 +201,33 @@ class MuseExecOutput:
         return NativeThreadResult(harness=NativeHarness.MUSE, thread_id=session, text=text[:cap], text_truncated=len(text) > cap)
 
     @staticmethod
+    def tool_calls(outcome: CliOutcome, mount: BrowserMount) -> BrowserToolCalls:
+        # @intent muse-reader-skips-vendor-names-it-cannot-trust
+        # Each proposed task or side-effect intent on a mounted server,
+        # in the order Muse printed them, with the outcome of the record
+        # that finished the same task: the name is mcp, the server and
+        # the tool joined by double underscores, a name that fails the
+        # record's rule is skipped rather than raised, and a task with
+        # no completed record is failed.
+        records = CliRunner.json_objects(outcome.stdout)
+        mounted = {server.selection.definition.tool.value: server.selection.definition.tool for server in mount.servers}
+        payloads = [(record.get(native_threads.MUSE_PAYLOAD_TYPE_FIELD), record.get(native_threads.MUSE_PAYLOAD_FIELD)) for record in records]
+        finished = {payload.get(native_threads.MUSE_TASK_ID_FIELD): kind for kind, payload in payloads if kind in (native_threads.MUSE_TASK_COMPLETED_TYPE, native_threads.MUSE_TASK_FAILED_TYPE) and isinstance(payload, dict)}
+        calls: list[BrowserToolCall] = []
+        for kind, payload in payloads:
+            if kind not in (native_threads.MUSE_TASK_PROPOSED_TYPE, native_threads.MUSE_SIDE_EFFECT_INTENT_TYPE) or not isinstance(payload, dict):
+                continue
+            name = payload.get(native_threads.MUSE_TASK_KIND_FIELD, payload.get(native_threads.MUSE_OPERATION_FIELD))
+            prefix, _separator, rest = name.partition(browser_tools.MUSE_TOOL_NAME_SEPARATOR) if isinstance(name, str) else ("", "", "")
+            server, separator, tool = rest.partition(browser_tools.MUSE_TOOL_NAME_SEPARATOR)
+            if prefix != browser_tools.MUSE_MCP_TOOL_PREFIX or not separator or server not in mounted or not RecordFieldValidator.accepts_text(tool, max_chars=native_threads.NATIVE_NAME_MAX_CHARS, pattern=native_threads.NATIVE_NAME_PATTERN):
+                continue
+            completed = finished.get(payload.get(native_threads.MUSE_TASK_ID_FIELD)) == native_threads.MUSE_TASK_COMPLETED_TYPE
+            calls.append(BrowserToolCall(tool=mounted[server], name=tool, status=BrowserToolCallStatus.COMPLETED if completed else BrowserToolCallStatus.FAILED))
+        cap = browser_tools.BROWSER_TOOL_CALLS_MAX_ITEMS
+        return BrowserToolCalls(calls=tuple(calls[:cap]), truncated=len(calls) > cap)
+
+    @staticmethod
     def _session(records: list[Mapping[str, object]]) -> str | None:
         # The id of the first record on a session stream, when it is a
         # thread id the result record accepts.
@@ -208,4 +249,147 @@ class MuseExecOutput:
         return None
 
 
-__all__ = ["MuseExecOutput", "MuseWire"]
+class MuseSessionWire:
+    """Builds the session/list and session/read parameters of the Muse helpers and reads their answers."""
+
+    @staticmethod
+    def list_params(workspace_root: str, limit: int, cutoff: datetime | None) -> dict[str, object]:
+        # session/list of the workspace's sessions; updatedAfter only
+        # when the call has a window.
+        params: dict[str, object] = {native_threads.MUSE_WORKSPACE_ROOT_FIELD: workspace_root, native_threads.MUSE_LIMIT_FIELD: limit}
+        if cutoff is not None:
+            params[native_threads.MUSE_UPDATED_AFTER_FIELD] = cutoff.isoformat()
+        return params
+
+    @staticmethod
+    def read_items_params(thread_id: str) -> dict[str, object]:
+        # session/read of the thread with its items, for the evidence.
+        return {native_threads.MUSE_SESSION_ID_FIELD: thread_id, native_threads.MUSE_EXCLUDE_ITEMS_FIELD: False}
+
+    @staticmethod
+    def result(outcome: CliOutcome, request: NativeHelperRequest | NativeThreadRequest, errors: NativeErrorFactory, *, method: MuseMethod, thread_id: str | None = None) -> Mapping[str, object]:
+        # The serve exchange passed the control timeout, or printed more
+        # than the cap: the answer cannot be trusted.
+        if outcome.timed_out:
+            raise errors.failure(NativeThreadProblem.TIMED_OUT, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS)
+        if outcome.stdout_truncated:
+            raise errors.failure(NativeThreadProblem.OUTPUT_TOO_LARGE, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+
+        # Muse must have answered the session request.
+        answers = [frame for frame in CliRunner.json_objects(outcome.stdout) if frame.get(native_threads.JSONRPC_ID_FIELD) == native_threads.MUSE_SESSION_REQUEST_ID]
+        if not answers:
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr)
+        answer = answers[0]
+
+        # @intent muse-helper-json-rpc-errors-are-classified
+        # -32020 is a thread Muse does not have; -32601 is a Muse too
+        # old for the method, which the SDK cannot read around; any
+        # other error is a failed request with Muse's own message.
+        error = answer.get(native_threads.JSONRPC_ERROR_FIELD)
+        if isinstance(error, dict):
+            code, message = error.get(native_threads.JSONRPC_CODE_FIELD), error.get(native_threads.JSONRPC_MESSAGE_FIELD)
+            vendor = message if isinstance(message, str) else ""
+            if code == native_threads.MUSE_SESSION_NOT_FOUND_CODE:
+                raise errors.failure(NativeThreadProblem.THREAD_NOT_FOUND, request=request, thread_id=thread_id, outcome=outcome, vendor_text=vendor)
+            if code == native_threads.MUSE_METHOD_NOT_FOUND_CODE:
+                raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, outcome=outcome, vendor_text=vendor, searched=native_threads.MUSE_METHOD_NOT_FOUND_DETAIL.format(method=method.value))
+            raise errors.failure(NativeThreadProblem.RUN_FAILED, request=request, thread_id=thread_id, outcome=outcome, vendor_text=vendor)
+
+        # A success answer carries one result object.
+        result = answer.get(native_threads.JSONRPC_RESULT_FIELD)
+        if not isinstance(result, dict):
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, outcome=outcome, missing_member=native_threads.JSONRPC_RESULT_FIELD)
+        return result
+
+    @staticmethod
+    def exited(outcome: CliOutcome, request: NativeHelperRequest | NativeThreadRequest, errors: NativeErrorFactory, *, thread_id: str | None = None) -> None:
+        # An export or init child must have finished within the control
+        # timeout and the output cap, and exited 0, as the one mapping
+        # says (spec D-35); Muse has no not-found text here, and a
+        # failed exit keeps Muse's own words.
+        problem = NativeErrorFactory.child_problem(outcome)
+        if problem is not None:
+            raise errors.failure(problem, request=request, thread_id=thread_id, outcome=outcome, vendor_text=outcome.stderr, seconds=native_threads.NATIVE_CONTROL_TIMEOUT_SECONDS, cap_bytes=native_threads.NATIVE_PROCESS_MAX_OUTPUT_BYTES)
+
+    @staticmethod
+    def sessions(result: Mapping[str, object], request: NativeHelperRequest, errors: NativeErrorFactory) -> tuple[NativeThreadSummary, ...]:
+        # Every Session of a session/list result, read strictly: one bad
+        # Session fails the whole list (spec INV-6).
+        sessions = result.get(native_threads.MUSE_SESSIONS_FIELD)
+        if not isinstance(sessions, list) or not all(isinstance(session, dict) for session in sessions):
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, searched=native_threads.MUSE_MEMBER_DETAIL.format(member=native_threads.MUSE_SESSIONS_FIELD))
+        return tuple(MuseSessionWire._summary(session, request, errors) for session in sessions)
+
+    @staticmethod
+    def session(result: Mapping[str, object], request: NativeHelperRequest, errors: NativeErrorFactory) -> NativeThreadSummary:
+        # The Session of a session/read result.
+        session = result.get(native_threads.MUSE_SESSION_FIELD)
+        if not isinstance(session, dict):
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, searched=native_threads.MUSE_MEMBER_DETAIL.format(member=native_threads.MUSE_SESSION_FIELD))
+        return MuseSessionWire._summary(session, request, errors)
+
+    @staticmethod
+    def tool_calls(result: Mapping[str, object], request: NativeThreadRequest, errors: NativeErrorFactory, *, thread_id: str) -> tuple[NativeToolCall, ...]:
+        # The history comes in one of four modes; inline holds the
+        # items itself, and both snapshot modes hold them in the state.
+        history = result.get(native_threads.MUSE_HISTORY_FIELD)
+        mode = history.get(native_threads.MUSE_HISTORY_MODE_FIELD) if isinstance(history, dict) else None
+        if not isinstance(history, dict) or mode is None:
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, searched=native_threads.MUSE_MEMBER_DETAIL.format(member=native_threads.MUSE_HISTORY_FIELD))
+
+        # @intent muse-anchored-snapshot-holds-every-item
+        # After a compaction Muse serves an anchored snapshot, which MSP
+        # calls the full folded state: its items are every item at the
+        # snapshot cursor, so it is read exactly like a snapshot (spec
+        # D-33). Mode none has no items at all, so the evidence read
+        # fails closed naming the reason.
+        if mode == native_threads.MUSE_HISTORY_NONE:
+            reason = history.get(native_threads.MUSE_NONE_REASON_FIELD)
+            raise errors.failure(NativeThreadProblem.COMMAND_NOT_RUN, request=request, thread_id=thread_id, searched=native_threads.MUSE_HISTORY_NONE_DETAIL.format(reason=reason))
+        items: object = None
+        if mode == native_threads.MUSE_HISTORY_INLINE:
+            items = history.get(native_threads.MUSE_ITEMS_FIELD)
+        if mode in (native_threads.MUSE_HISTORY_SNAPSHOT, native_threads.MUSE_HISTORY_ANCHORED):
+            snapshot = history.get(native_threads.MUSE_SNAPSHOT_FIELD)
+            state = snapshot.get(native_threads.MUSE_STATE_FIELD) if isinstance(snapshot, dict) else None
+            items = state.get(native_threads.MUSE_ITEMS_FIELD) if isinstance(state, dict) else None
+        if not isinstance(items, list):
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, thread_id=thread_id, searched=native_threads.MUSE_MEMBER_DETAIL.format(member=native_threads.MUSE_ITEMS_FIELD))
+
+        # Every toolCall item with a usable tool name, its args as Muse
+        # wrote them; an item without a usable name cannot be evidence.
+        calls = []
+        for item in items:
+            if not isinstance(item, dict) or item.get(native_threads.MUSE_ITEM_KIND_FIELD) != native_threads.MUSE_TOOL_CALL_KIND:
+                continue
+            tool, args = item.get(native_threads.MUSE_TOOL_FIELD), item.get(native_threads.MUSE_ARGS_FIELD)
+            if RecordFieldValidator.accepts_text(tool, max_chars=native_threads.NATIVE_TOOL_NAME_MAX_CHARS):
+                calls.append(NativeToolCall(name=str(tool), arguments=args if isinstance(args, str) else json.dumps(args)))
+        return tuple(calls)
+
+    @staticmethod
+    def _summary(session: Mapping[str, object], request: NativeHelperRequest, errors: NativeErrorFactory) -> NativeThreadSummary:
+        # One MSP Session as a summary: forkedFrom is null or an object
+        # naming the source; Muse keeps no title. A member the record
+        # refuses is named as MSP spells it.
+        forked = session.get(native_threads.MUSE_FORKED_FROM_FIELD)
+        if forked is not None and not isinstance(forked, dict):
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, searched=native_threads.MUSE_MEMBER_DETAIL.format(member=native_threads.MUSE_FORKED_FROM_FIELD))
+        try:
+            parent = None if forked is None else RecordFieldConverter.require_instance(forked.get(native_threads.MUSE_SESSION_ID_FIELD), native_threads.MUSE_FORKED_FROM_FIELD, str, optional=True)
+            return NativeThreadSummary(
+                harness=NativeHarness.MUSE,
+                thread_id=RecordFieldConverter.require_instance(session.get(native_threads.MUSE_SESSION_ID_FIELD), native_threads.MUSE_SESSION_ID_FIELD, str),
+                title=None,
+                created_at=RecordFieldConverter.to_utc_datetime(session.get(native_threads.MUSE_CREATED_AT_FIELD), native_threads.MUSE_CREATED_AT_FIELD),
+                updated_at=RecordFieldConverter.to_utc_datetime(session.get(native_threads.MUSE_UPDATED_AT_FIELD), native_threads.MUSE_UPDATED_AT_FIELD),
+                parent_thread_id=parent,
+                model=RecordFieldConverter.require_instance(session.get(native_threads.MUSE_MODEL_ID_FIELD), native_threads.MUSE_MODEL_ID_FIELD, str, optional=True),
+            )
+        except ConfigurationError as exc:
+            field = str(exc.details.get(native_threads.NATIVE_FIELD_DETAIL_KEY, ""))
+            member = native_threads.MUSE_SESSION_MEMBERS.get(field, field)
+            raise errors.failure(NativeThreadProblem.PROTOCOL_MISMATCH, request=request, searched=native_threads.MUSE_MEMBER_DETAIL.format(member=member)) from exc
+
+
+__all__ = ["MuseExecOutput", "MuseSessionWire", "MuseWire"]

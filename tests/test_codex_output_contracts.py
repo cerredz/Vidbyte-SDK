@@ -407,6 +407,7 @@ class ContractValidationTests(unittest.TestCase):
             "allowed_tools": ("shell",),
             "tool_error_policy": ToolErrorPolicy(),
             "tool_settings": ToolSettings(),
+            "max_spend_usd": 1.0,
         }
         self.assertEqual(set(cases), set(CODEX_UNSUPPORTED_LOOP_FIELDS))
         for field, value in cases.items():

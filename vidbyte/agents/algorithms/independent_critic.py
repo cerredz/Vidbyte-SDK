@@ -71,8 +71,11 @@ class IndependentCriticRuntimeAlgorithm:
         tools = self._resolve_tools()
         candidate = await self._run_candidate(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
         # @intent middleware-abort-ends-the-run
-        # An aborted producer left the SDK's stop text, not a candidate, and the abort ends the run, so nothing is reviewed.
-        if candidate.metadata.get("stop_reason") == AgentStopReason.MIDDLEWARE_ABORT.value:
+        # An aborted producer left the SDK's stop text, not a candidate,
+        # and the abort ends the run, so nothing is reviewed. A producer
+        # the spend cap stopped ends the run the same way, so no
+        # reviewer spends after it.
+        if candidate.metadata.get("stop_reason") in (AgentStopReason.MIDDLEWARE_ABORT.value, AgentStopReason.MAX_SPEND.value):
             return candidate
         # Review on the model that produced the candidate, so a producer that failed over is not reviewed by the failed model.
         handle = self.runtime._active_handle(handle)

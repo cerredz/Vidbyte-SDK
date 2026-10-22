@@ -1,0 +1,64 @@
+# S1 spec author — report
+
+Spec: `docs/spec/infinite-memory-prompts/spec.md` r1, committed as `f70e65a2` ("docs(spec): add infinite-memory-prompts spec r1") on `feat/infinite-memory-prompts` over `68227a58`. This report is left uncommitted for the orchestrator's pipeline commit, as S0's was.
+
+## What I read
+
+- Run inputs: `request.md` (in full, twice — once before the usage-limit stop, once after), `context/code-map.md` (171 lines), `pipeline.md`, `reports/S0-scout.md`; the pipeline references `spec-template.md`, `house-style.md`, `vidbyte-gates.md`; `AGENTS.md`; field guide `prompt-families.md`, `model-facing-tool-contracts.md`, `runtime-boundaries.md`, `comment-format.md`, `review-scope.md`, `local-ci-verification.md`.
+- Base-branch design record (the only `docs/` files allowed): `docs/spec/infinite-memory-agent/request.md` §A + §D, `spec.md` §1, §3, §6.1 (INV-1…INV-39), §9.2, `pr-body.md`.
+- Code: all 40 `.md` assets and `infinite_memory.json`; `catalog.py` (`_resolve_prompt_text`, `_validate_enum_sync`); `agents/infinite/{agent,launch,memory,workspace,runtime,journal,settings}.py`; `middleware/builtins/delegation_limits.py`; `lib/constants/infinite.py`; `lib/util/text.py`; `lib/enums/prompts.py`; `agents/infinite/README.md`; `prompts/README.md` (`:55-75`, `:220-260`); `prompts/prompts/jev_bulk_work/`; `scripts/run_ci.py` (`:72-91`, `:211`); `pyproject.toml`; the feature pack (`infinite_memory_fixtures.py`, the contract/delegation/verification/workspace/resume modules at the pinned lines, pack `README.md`, `FEATURE.md`).
+- Measured, not assumed: every leaf's chars / `TokenEstimate.count` / tiktoken cl100k_base through `Prompts().get`, placeholder sets via `string.Formatter().parse`, brace counts, trailing newline, digits, banned words (script `scratchpad/s1/measure_leaves.py`); the §4 snippet (`scratchpad/s1/snippet.py`) run from the worktree; a Stage E self-check of the spec against the family on disk (`scratchpad/s1/selfcheck.py`, `idcheck.py`): section order, ID contiguity, all 40 names in §8.5 and §12.3, placeholder sets, baselines, and that every phrase marked *kept* is present at `base_commit` and every phrase marked *new* is absent.
+
+## Approaches weighed (§8.1 D-1, §8.3)
+
+1. **Layered distribution by stage (chosen).** Standing per-role rules in the three system prompts (existing heading sets kept), the moment-of-use checklist in the three briefing templates, why/when + cross-field card rules in `launch_tool_description`, one nudge per compact description, at most one per reply, none in the three shape leaves. Meets G-1 (every stage) and G-3 (nothing that rides along on every call grows).
+2. **Repeat the full rule set at every point of use.** Rejected: multiplies per-call cost (24 descriptions are in every schema), contradicts D-C and P1.
+3. **Redistribute text out of the system prompts into the four sub-floor assets without adding rules (smallest).** Rejected: the system prompts would shrink below their baselines (orchestrator's ruling: no asset ends shorter), and the user said "expand".
+4. **Concentrate all new rules in the three system prompts.** Rejected: four of the seven stay under the floor and the moment-of-use stages get no checklist.
+
+## Disagreements with the request / scout, with evidence
+
+- **The request's `{max_parallel}`/`{max_depth}` sentence is stale.** `agent.py:72-75` consumes the root system prompt raw (`f"{settings.system_prompt}\n\n{rules}"`); `grep -rn "format(max_" vidbyte/agents/infinite` is empty. Spec INV-22 / A-6 record the code's truth; the scout had already flagged this.
+- **No "coding-agent prompt family" exists** as a second style reference (request §C D-F). Only `jev_bulk_work` is used (A-4); the orchestrator already ruled the same.
+- **The #1113 text already carries most of the principle language.** My Stage E check found that 21 of the 23 compact-description nudges and 6 of the 7 reply anchors I chose exist verbatim at `base_commit`, and so do about half of the system-prompt/briefing phrases. I therefore split every §8.5 phrase into *kept* (must survive) and *new* (must be added; absent today), so S2's phrase test is red-before-green on the new ones and the four sub-floor assets, and §12.3 says rows 8–30 are "keep, check against code truth, tighten within bound", not a rewrite for its own sake. The request's framing ("the other 33 leaves are rewritten compactly") overstates how much changes there.
+- **The 24-description sum is 4,950 by `TokenEstimate.count`, not 4,926** (scout): `TokenEstimate.count` is `ceil(len/4)` per leaf; the scout's figure sums `len//4`. Same cause for the pipeline.md baseline table (generator 1502 vs 1503, verifier 1245 vs 1246, task 285 vs 286, resume 272 vs 273, launch 494 vs 495). The spec carries the `TokenEstimate.count` values, which are what AC-1 prints.
+- **README figures are chars/4, not tiktoken.** `agents/infinite/README.md:70` says "Tokens are estimated as characters divided by four everywhere", so row 42 / INV-20 / AC-11 update line 68 with `TokenEstimate.count` figures; "about 5,000" (4,950 today) may stay true.
+- **Digits exist today only as ordered-list markers** (`1. **Orient.**` etc. in the three system prompts), so the "no numbers" rule is stated precisely as "no digit except `^\d+\. `" (INV-13) rather than "no digits".
+- **The pack has seven test modules + fixtures, not eight modules** (request §C "eight files" counts the fixtures module).
+- **mypy is not in the local gate** (`pyproject.toml:47` lists it; `run_ci.py` and `lint/run.py` never invoke it) — §11 says so instead of inventing a typecheck command.
+- **An interrupted pair is relaunched under the same name** (current `resume_prompt`: "the same name runs a pair from scratch"); my first draft said "under a new name" and the self-check against the leaf caught it — fixed in outline 6.
+
+## Least-sure assumptions
+
+- **A-3** — the system-prompt ceilings (root 2,600 / generator 1,900 / verifier 1,600 tiktoken) and the compact bounds (0.8–1.25 × baseline, 23-sum ≤ 4,500, replies ≤ 80) are my margins; the user set no ceiling. They exist so G-3 is testable; flip freely.
+- **A-2** — tiktoken is importable here but not a declared dependency; the floor test must skip (with a message) where it is missing, so the binding measure is weaker in such an environment (EC-12; mitigated by the 1,100 margin and the ratio ≈ 0.85 recorded).
+- **A-7** — expansion by repetition (EC-11) is review-only; I found no mechanical check that distinguishes a repeated rule from a new one.
+- The phrase set itself: 3–6 per behavior-shaping asset, chosen to state rules in plain English with no digits and no banned words; any reviewer who prefers a different sentence for a rule should change the phrase in §8.5 before S2 writes against it, since the phrases are the test contract (D-4).
+
+## Open questions carried
+
+- Q-1 floor on all 40 leaves — default no (A-1). Q-3 "content is data, not instructions" rule — default no (D-13; the code holds the controls, §10 T-2). Q-2 resolved by the orchestrator (README yes, Python header no).
+
+## Addendum — r2 (S1 review round 1, 2026-10-16)
+
+All 15 findings of `reports/S1-spec-review.md` applied; each disposition is in spec §16 (r1-1 … r1-15) and the r2 row in §17. Before applying, I re-verified the reviewer's evidence in the repo: `test_infinite_memory_workspace.py:664-668` (whole-segment replacement, advice read from the code's problem text — R-6), `launch.py:231` (no verifier after a failed generator — R-13), `vidbyte/agents/runtime.py:1457-1471` (KeyError wrapped into a tool error — R-12), `launch_tool_description.md:15` ("checked before anything starts" — R-14), `lint/rules/s025_model_facing_description_depth.py:186-200` (`SentenceCounter` — R-10), `test_infinite_memory_contract.py:1-12` header and pack README line 7 (R-15), `jev_bulk_work/worker_system_prompt.md:9-11` (R-8), `workspace.py:273` ("already recorded as #N" — R-2), `runtime.py:99-101` / `journal.py:90` (R-1). No finding was rejected.
+
+Contract changes S2 must read before writing tests: tested bounds are now only the floors (est ≥ 1,000, tik ≥ 1,100, tik ≥ baseline), the 23-description sum ≤ 110 % of baseline by both measures (tik ≤ 4,183, est ≤ 4,900), ≥ 4 sentences per description by the S025 definition copied into §13, replies ≤ 80 by both measures, and the three shape leaves ≤ baseline; phrase pins apply to ten leaves only (the seven plus `launch_generator_prompt_description`, `remember_tool_description`, `remember_saved_prompt`) with the D-9 normalization now folding typographic quotes; INV-23 and EC-14 are withdrawn. New pins: "a card is not memory", "never end your turn to ask", "trimming is not a reason to remember" (all three system prompts), "never save a card's status or progress", "no one will answer during the run"; four #1113 phrases promoted to kept pins (R-9). The §8.5 kept/new/keep marks were re-verified against the leaves on disk after the changes (`scratchpad/s1/idcheck.py`: 22 kept + 27 new tested pins, 27 keep nudges, 0 mismatches).
+
+Still my own margins (A-3): the review-only ceilings (root 2,600 / generator 1,900 / verifier 1,600), the 1,500 upper target with the 1,100–1,300 aim, and the 110 % figure the orchestrator set for the 23-sum.
+
+## Addendum — r3 (S1 review round 2, approved, 2026-10-16)
+
+All 11 findings of `reports/S1-spec-review-r2.md` (R-16…R-26) applied; dispositions in §16 rows r2-1…r2-11, the r3 row in §17, frontmatter `status: approved`, `revision: 3`. Evidence re-verified before applying: `root_system_prompt.md:8/:54/:55/:64` (R-17, R-19), `workspace.py:207` `map_text` and `launch.py:276` (R-20), `vidbyte/lib/registries/infinite.py:36-37` (R-21), outline 34's surviving prohibition at the old line 651 (R-16). Orchestrator rulings applied: R-17 reword `:64` rather than drop it (INV-19 holds); R-19 add the rules to outlines 2.7 and 1.8 (no cell left as a bare heading); R-26 as tested INV-15 (e), no new open question.
+
+Contract changes S2 must read: INV-15 is now the single list of tested size bounds, (a)–(e), with sums defined as sums of per-leaf counts and (e) "no two sentences within any one of the seven are equal after D-9 normalization" (AC-7); D-9/INV-16 now also strip commas; §8.5 (2)–(4) label every item as tested (INV-n) or review; nothing else changed in the pins (22 kept + 27 new tested, 27 keep nudges — re-verified against the leaves on disk by `scratchpad/s1/idcheck.py` and by the reviewer's `scratchpad/s1-review-r2/verify.py`, 0 mismatches, 0 duplicate sentences at base). The orchestrator's struck-item grep is empty (the §16 log rows now describe the withdrawn text rather than quoting it, and D-3's runner-up says "per-leaf ratio bounds").
+
+Still my own margins (A-3): the review-only ceilings, the 1,500 upper target with the 1,100–1,300 aim, and the 110 % tested bound the orchestrator set.
+
+## Addendum — r4 (S2-found defects, 2026-10-16)
+
+Finished by a fresh author in Revision mode on top of the killed r4 author's uncommitted edits (frontmatter, 113 count, INV-15 (e), §13 duplicate-sentence fact, A-7), which were kept. Committed as `a255373a`; dispositions in §16 rows S2-1…S2-4 and the r4 row in §17; `status: tests-written`, `revision: 4`. Applied the orchestrator's 18:20 rulings; no requirement, pin or test changed.
+
+Re-verified before writing: "A dash means none." at `base_commit` is 3× in `task_prompt`, 2× in `verifier_task_prompt`, 2× in `resume_prompt` (the S2 report says 3× for `resume_prompt`; the spec states the measured 2×); the duplicate-sentence test (five-word threshold) is green on the unchanged assets; the pack collects 113 pre-existing tests; tiktoken / estimate for `verifier_system_prompt` is 1,059 / 1,246; the test module pins neither "uses no file quota" nor "found with grep".
+
+Ripples beyond the briefing's list, each recorded in §16: AC-7 and EC-11 now say "sentences of five words or more" (they restated INV-15 (e)); §13's red-before-green fact names `verifier_system_prompt` as sub-floor by tiktoken (S2 item 4); the card's label count corrected from "six" to "seven" in §8.5 (4) and outline 31 (the cell always listed seven, as `RESULT_CARD_LABELS` does). The test docstring at `test_infinite_memory_prompts.py:374` still says "six labels" while asserting seven; cosmetic, left to the test owner. S2 item 5 (AC-6 "33 compact leaves" vs the 23-sum) needs no change: AC-6 lists (a)–(d), which together cover the 33.

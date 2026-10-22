@@ -64,6 +64,7 @@ class ContinualTraceAgent(BaseAgent):
             api_keys=source_agent.runner_config.api_keys,
             model_mode=source_agent.runner_config.model_mode,
             temperature=source_agent.runner_config.temperature,
+            reasoning_effort=source_agent.runner_config.reasoning_effort,
             timeout_seconds=source_agent.runner_config.timeout_seconds,
             fallback=source_agent._fallback_spec,
         )

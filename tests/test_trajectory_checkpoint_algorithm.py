@@ -209,6 +209,23 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ran tests", final_system)
         self.assertNotIn("### Output\nNone", final_system)
 
+    async def test_runtime_checkpoint_keeps_an_off_scale_or_non_finite_score_on_its_scale(self) -> None:
+        # [Hidden Failure] A summarizer score of 85 or NaN reaches the main model clamped to 0.0-1.0 or as N/A, like the checkpoint tool's.
+        @tool
+        def lookup() -> str:
+            return "plan=pro"
+        # json.dumps writes float("nan") as the bare NaN token, which json.loads accepts.
+        for raw_score, expected_score, shown, hidden in ((85, 1.0, "1.00", "85.00"), (float("nan"), None, "N/A", "nan")):
+            with self.subTest(raw_score=raw_score):
+                summary = json.dumps({"reasoning_summary": "res", "trajectory": "traj", "output": "out", "score": raw_score, "feedback": "feed"})
+                runner = FakeRunner([tool_response(), FakeResponse(summary), is_done_response("final output")])
+                runtime = AgentRuntime(agent_name="worker", system_prompt="Work.", tools=Tools([lookup]), permission_policy=PermissionPolicy(), algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=TrajectoryCheckpointAlgorithm(interval=1)))
+                result = await runtime.arun("task", handle=runner_handle(runner), context=base_context())
+                final_system = runner.calls[2]["kwargs"]["system"]
+                self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoints"][0]["score"], expected_score)
+                self.assertIn(f"### Score\n{shown}", final_system)
+                self.assertNotIn(f"### Score\n{hidden}", final_system)
+
     async def test_runtime_does_not_write_checkpoint_before_interval(self) -> None:
         # Verify checkpoint is omitted before interval boundary.
         runner = FakeRunner([FakeResponse("draft"), is_done_response()])

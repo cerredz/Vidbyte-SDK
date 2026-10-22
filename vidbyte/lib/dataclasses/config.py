@@ -92,6 +92,7 @@ _NON_LINEAR_RUNTIMES = frozenset({AgentRuntimeType.MCTS_SEARCH, AgentRuntimeType
 _LOOP_FIELDS = frozenset(
     {
         "max_iterations", "max_tokens", "max_tool_calls", "max_queued_prompts", "max_parallel_tool_calls", "max_retries", "timeout_seconds",
+        "max_spend_usd",
         "context_window_budget", "compaction_trigger_tokens", "compaction_target_tokens", "allowed_tools", "tool_error_policy", "tool_settings",
         "output_contracts", "max_contract_rejections",
     }

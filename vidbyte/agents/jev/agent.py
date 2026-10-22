@@ -42,6 +42,7 @@ class JevAgent(BaseAgent):
         if not isinstance(runtime_settings, JevRuntimeSettings):
             raise ConfigurationError("JevAgent runtime_settings must be a JevRuntimeSettings instance.")
         self._require_metered_specialists(settings)
+        self._require_capped_specialists(settings)
         self.settings = settings
         self.runtime_settings = runtime_settings
         self._response = JevResponse()
@@ -68,6 +69,7 @@ class JevAgent(BaseAgent):
                 api_keys=settings.api_keys,
                 model_mode=settings.model_mode,
                 temperature=settings.temperature,
+                reasoning_effort=settings.reasoning_effort,
                 timeout_seconds=settings.timeout_seconds,
                 # @intent jev-children-never-steal-main-agent-tools
                 # Agent-bound builtins get unbound copies, as in a fork, so the main agent's tools stay bound to it.
@@ -100,6 +102,7 @@ class JevAgent(BaseAgent):
             provider=settings.provider,
             model_name=settings.model_name,
             temperature=settings.temperature,
+            reasoning_effort=settings.reasoning_effort,
             timeout_seconds=settings.timeout_seconds,
             outputs=settings.outputs,
             system_prompt_presets=settings.system_prompt_presets,
@@ -122,6 +125,24 @@ class JevAgent(BaseAgent):
                 raise ConfigurationError(
                     f"JevAgent specialist {specialist.title!r} must be a BaseAgent that replies through BaseAgent.generate_reply, so its usage counts toward the run total.",
                     details={"specialist": specialist.title, "agent_type": type(agent).__name__},
+                )
+
+    @staticmethod
+    def _require_capped_specialists(settings: JevAgentSettings) -> None:
+        # Rejects any specialist that could spend past this agent's cap.
+        # @intent a-delegated-run-keeps-the-spend-cap
+        # A specialist the gate chooses runs its own agent, never this
+        # agent's loop, so only its own cap, no higher than this one,
+        # can stop it; an uncapped specialist would spend unbounded.
+        jev_cap = settings.loop.max_spend_usd
+        if jev_cap is None:
+            return
+        for specialist in settings.agents:
+            cap = specialist.agent.agent_loop_settings.max_spend_usd
+            if cap is None or cap > jev_cap:
+                raise ConfigurationError(
+                    f"JevAgent specialist {specialist.title!r} must set agent_loop_settings.max_spend_usd no higher than this JevAgent's {jev_cap}, because a delegated run never enters JevAgent's loop.",
+                    details={"specialist": specialist.title, "max_spend_usd": jev_cap, "specialist_max_spend_usd": cap},
                 )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:

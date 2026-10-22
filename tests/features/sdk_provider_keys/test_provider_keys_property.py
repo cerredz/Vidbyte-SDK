@@ -1,9 +1,9 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_property.py
 
 PURPOSE: Proves the algebraic promises of ProviderKeyMatcher.match over many generated lists: the outcome never depends on list order or on the environment (INV-9), and every outcome is either a well-formed ProviderKeys or a ConfigurationError that names no key (INV-10); a returned record passes back through match unchanged (D-13).
-ROLE IN CODEBASE: Property layer of tests/features/sdk_provider_keys/ (spec INV-9, INV-10, INV-25, NFR-2). Exercises vidbyte/lib/registries/provider_keys.py only.
+ROLE IN CODEBASE: Property layer of tests/features/sdk_provider_keys/ (spec INV-9, INV-10, INV-25, NFR-2; meta-muse-managed-text FR-9 through the pool). Exercises vidbyte/lib/registries/provider_keys.py only.
 ARCHITECTURE NOTE: hypothesis is not a dependency (spec section 13), so cases come from a seeded random.Random and every permutation of each generated list is tried exhaustively. The generator mixes proven keys, unproven keys with and without sk-, a Vidbyte key, None, blanks, padded copies and repeats, over random primaries and configured backups, so both outcomes occur often; a guard fails the test if either outcome becomes rare, which would make the property vacuous.
-COMMON MODIFICATION PATTERNS: When table F gains a row, add a proven fake for it to POOL. Raise CASES only if the run stays well under a second.
+COMMON MODIFICATION PATTERNS: When table F gains a row, or a row gains a key shape (as meta did with LLM_), add a proven fake for it to POOL and PROVEN. Raise CASES only if the run stays well under a second.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import ProviderKeyMatcher at module level. 2. Do not seed from the clock; a failure must reproduce. 3. Do not compare records from permuted lists with ==; the spec keeps first-appearance order, so compare key_view.
 KNOWN EDGE CASES: Lists are capped at five entries so all 120 orders of each can be tried. An error may name a different index for a different order; only the outcome kind and the record's meaning must agree.
 RELATED DOCS: tests/features/sdk_provider_keys/FEATURE.md; docs/spec/byok-api-keys/spec.md sections 6.1 (INV-9, INV-10) and 9.2 ("Matching").
@@ -24,6 +24,7 @@ from tests.features.sdk_provider_keys.provider_keys_fixtures import (
     K_ANTHROPIC,
     K_GEMINI_AQ,
     K_META,
+    K_META_DOC,
     K_OPENAI,
     K_OPENAI_2,
     K_OPENAI_JWT,
@@ -43,7 +44,7 @@ CASES = 160
 MAX_ENTRIES = 5
 # Every kind of entry the matcher must handle; None and blanks are skipped, padded copies strip to their key.
 POOL: tuple[str | None, ...] = (
-    K_ANTHROPIC, K_XAI, K_OPENAI, K_OPENAI_2, K_OPENROUTER, K_GEMINI_AQ, K_META,
+    K_ANTHROPIC, K_XAI, K_OPENAI, K_OPENAI_2, K_OPENROUTER, K_GEMINI_AQ, K_META, K_META_DOC,
     K_UNPROVEN, K_UNPROVEN_2, K_SK_UNPROVEN, K_SK_UNPROVEN_2, K_OPENAI_JWT, VIDBYTE_KEY,
     None, "", "   ", f"  {K_XAI}\n", f"\t{K_UNPROVEN} ",
 )
@@ -56,7 +57,7 @@ PROVIDERS = (
 PROVEN: dict[str, ModelProvider] = {
     K_ANTHROPIC: ModelProvider.ANTHROPIC, K_XAI: ModelProvider.XAI, K_OPENAI: ModelProvider.OPENAI,
     K_OPENAI_2: ModelProvider.OPENAI, K_OPENROUTER: ModelProvider.OPENROUTER, K_GEMINI_AQ: ModelProvider.GEMINI,
-    K_META: ModelProvider.META,
+    K_META: ModelProvider.META, K_META_DOC: ModelProvider.META,
 }
 # Junk provider variables: matching must never read them (INV-9, INV-23).
 NOISY_ENVIRONMENT = {"OPENAI_API_KEY": K_SK_UNPROVEN_2, "DEEPSEEK_API_KEY": K_UNPROVEN_2, "VIDBYTE_API_KEY": VIDBYTE_KEY, "XAI_API_KEY": K_XAI}

@@ -3,9 +3,9 @@
 Description:
     Model execution configuration dataclasses for text, image, and video models.
 Purpose:
-    Stores model configurations and delegates API key and endpoint validation and resolution to ProviderModelRegistry.
+    Stores model configurations and delegates API key and endpoint validation and resolution to ProviderModelRegistry, and reasoning-effort checks to ReasoningEffortRegistry.
 Architecture:
-    - TextModelConfig: dataclass for text/chat completions; matches its api_keys list to its provider at construction.
+    - TextModelConfig: dataclass for text/chat completions; matches its api_keys list to its provider and checks its reasoning effort against its mode and model at construction.
     - TextCredentials: the keys one text call sends, resolved for its mode.
     - ImageModelConfig: dataclass for image generation.
     - VideoModelConfig: dataclass for video generation tasks.
@@ -42,10 +42,17 @@ from vidbyte.lib.constants.jev import (
     VIDBYTE_PROVIDER_KEY_MAX_LENGTH,
 )
 from vidbyte.lib.dataclasses.agents import ProviderKeys
-from vidbyte.lib.enums import DecisionModelMode, ModelProvider, TextModelMode
+from vidbyte.lib.dataclasses.validation import RecordFieldConverter
+from vidbyte.lib.enums import (
+    DecisionModelMode,
+    ModelProvider,
+    ReasoningEffort,
+    TextModelMode,
+)
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+from vidbyte.lib.registries.reasoning_effort import ReasoningEffortRegistry
 
 # The way out a text call names when no Vidbyte key is found.
 TEXT_REMEDY: str = f"Pass vidbyte_api_key or set {VIDBYTE_API_KEY_ENV_VAR}, or use mode=TextModelMode.DIRECT to call the provider with your own key and no Vidbyte fee."
@@ -77,9 +84,10 @@ class TextModelConfig:
     # Where the runtime's own exchange begins in messages; the provider puts the prompt there.
     prompt_index: int | None = None
     vidbyte_api_key: str | None = field(default=None, repr=False)
+    reasoning_effort: ReasoningEffort | None = None
 
     def __post_init__(self) -> None:
-        """Reject a bad prompt_index or mode, refuse what the gateway can never serve, and match the key list, as soon as the config is built."""
+        """Reject a bad prompt_index or mode, refuse what the gateway can never serve, match the key list, and refuse a reasoning effort the call cannot send, as soon as the config is built."""
         # @intent prompt-sits-at-the-run-boundary
         if self.prompt_index is not None and (isinstance(self.prompt_index, bool) or not isinstance(self.prompt_index, int) or self.prompt_index < 0):
             raise ConfigurationError(f"prompt_index must be a non-negative int or None, got {self.prompt_index!r}.")
@@ -100,6 +108,7 @@ class TextModelConfig:
         matched = ProviderKeyMatcher.match(self.api_keys, primary=self.provider, vidbyte_api_key=self.vidbyte_api_key, field_name="TextModelConfig.api_keys")
         object.__setattr__(self, "api_keys", matched)
         object.__setattr__(self, "vidbyte_api_key", matched.vidbyte_api_key)
+        self._validate_reasoning_effort()
 
     def normalized_provider(self) -> ModelProvider:
         # Convert strings to the canonical provider enum at the SDK boundary.
@@ -206,6 +215,44 @@ class TextModelConfig:
             raise UnsupportedProviderError(
                 f"The Vidbyte gateway serves only: {supported}. Use mode=TextModelMode.DIRECT to call {provider.value} with your own key.",
                 details={"provider": provider.value, "mode": self.mode.value},
+            )
+
+    def _validate_reasoning_effort(self) -> None:
+        """Refuse a reasoning effort this config's mode, model, thinking_config or extra_body cannot send."""
+        # @intent reasoning-effort-is-never-silently-ignored
+        # A set effort is either sent in the provider's own form or
+        # refused here, before any request: a gateway mode, a value the
+        # model does not document, a second thinking switch, or an
+        # extra_body key that would overwrite the effort's wire form.
+        if self.reasoning_effort is None:
+            return
+        # Accept the enum or its exact value string, and store the enum.
+        effort = RecordFieldConverter.to_enum(self.reasoning_effort, ReasoningEffort, "TextModelConfig.reasoning_effort")
+        object.__setattr__(self, "reasoning_effort", effort)
+        # Refuse a gateway mode, then a value the model's row lacks.
+        provider = self.normalized_provider()
+        reason = ReasoningEffortRegistry.refusal(provider=provider, model=self.model, effort=effort, mode=self.mode)
+        if reason is not None:
+            raise ConfigurationError(
+                f"TextModelConfig sets reasoning_effort, but {reason}.",
+                details={"field": "TextModelConfig.reasoning_effort", "provider": provider.value, "model": self.model, "reasoning_effort": effort.value, "mode": self.mode.value},
+            )
+        # thinking_config is the provider's raw thinking switch, so the
+        # two would send conflicting instructions.
+        if self.thinking_config is not None:
+            raise ConfigurationError(
+                "TextModelConfig sets both reasoning_effort and thinking_config; set only one of them.",
+                details={"field": "TextModelConfig.reasoning_effort"},
+            )
+        # extra_body is merged last, so a key the effort's fragment uses
+        # would silently replace it; build the fragment alone to check.
+        fragment: dict[str, Any] = {}
+        ReasoningEffortRegistry.attach(fragment, provider=provider, model=self.model, effort=effort)
+        overlap = set(self.extra_body or {}) & set(fragment)
+        if overlap:
+            raise ConfigurationError(
+                f"TextModelConfig sets reasoning_effort, but extra_body also sets {', '.join(sorted(overlap))}, which the effort's wire form uses; remove them from extra_body or unset reasoning_effort.",
+                details={"field": "TextModelConfig.reasoning_effort"},
             )
 
     def _validate_temperature(self) -> None:

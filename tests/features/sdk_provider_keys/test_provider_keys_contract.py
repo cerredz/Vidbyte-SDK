@@ -1,7 +1,7 @@
 """FILE: tests/features/sdk_provider_keys/test_provider_keys_contract.py
 
 PURPOSE: Proves the public surface the spec commits to: the DIRECT member, the three wire constants, where ProviderKeyMatcher and ProviderKeys are exported, the field order of every renamed record, the removed methods, the table F, table A and reserved-prefix class tables, the signatures that replace api_key with api_keys, the old keyword failing loudly everywhere, the records' own refusals, and the manual scripts no longer passing api_key= to TextModelConfig.
-ROLE IN CODEBASE: Interface layer of tests/features/sdk_provider_keys/ (spec AC-24, AC-30; FR-1, FR-4 to FR-7, FR-11, FR-12, FR-16, FR-17; D-20, D-26; section 8.5 and section 12.3 rows 1 to 5, 11 to 13, 17 to 21, 24, 29, 39 and 41; table M rows M-16 and M-17; EC-39).
+ROLE IN CODEBASE: Interface layer of tests/features/sdk_provider_keys/ (spec AC-24, AC-30; FR-1, FR-4 to FR-7, FR-11, FR-12, FR-16, FR-17; D-20, D-26; section 8.5 and section 12.3 rows 1 to 5, 11 to 13, 17 to 21, 24, 29, 39 and 41; table M rows M-16 and M-17; EC-39; meta-muse-managed-text section 8.5, D-8, D-9, INV-17, AC-18, FR-9).
 ARCHITECTURE NOTE: Signatures are read with inspect and record layouts with dataclasses.fields, so a rename or a dropped parameter fails here before any behavior test runs. The manual scripts are parsed with ast, never executed.
 COMMON MODIFICATION PATTERNS: When the spec renames a public parameter, add the surface to SIGNATURES with the new name present and the old one absent. Keep field lists literal; never read them from the code under test.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import a new symbol at module level; each test imports what it checks. 2. Do not run the scripts in scripts/; AC-30 only needs them to parse and to pass no api_key= to TextModelConfig.
@@ -30,6 +30,15 @@ from vidbyte.lib.errors import ConfigurationError
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = ("scripts/test-new-runners.py", "scripts/test-async-http-transport.py", "scripts/test-openai-compatible-chat-trace-inputs.py")
+# meta-muse-managed-text AC-18: the two files that carry table F's
+# first-party sources, the matcher's code comments and the registries
+# README's "Provider Key Format Sources".
+MATCHER_SOURCE = REPO_ROOT / "vidbyte" / "lib" / "registries" / "provider_keys.py"
+REGISTRIES_README = REPO_ROOT / "vidbyte" / "lib" / "registries" / "README.md"
+# A Meta key written out as an example: an LLM_ or LLM| tag (the
+# README escapes | as \\|) followed by a digit. Neither file may hold
+# one (registries README "No example key is copied here").
+META_EXAMPLE_KEY = re.compile(r"LLM\\*[_|][0-9]")
 
 
 class NamesAndConstantsTests(unittest.TestCase):
@@ -68,12 +77,34 @@ class NamesAndConstantsTests(unittest.TestCase):
 
         rows = ProviderKeyMatcher.KEY_FORMATS
         self.assertEqual([ModelProvider(provider) for provider, _, _ in rows], [ModelProvider.ANTHROPIC, ModelProvider.OPENROUTER, ModelProvider.OPENAI, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.META])
-        self.assertEqual([set(prefixes) for _, prefixes, _ in rows], [{"sk-ant-"}, {"sk-or-"}, {"sk-proj-", "sk-svcacct-", "sk-admin-"}, {"xai-"}, {"AIza", "AQ."}, {"LLM|"}])
+        self.assertEqual([set(prefixes) for _, prefixes, _ in rows], [{"sk-ant-"}, {"sk-or-"}, {"sk-proj-", "sk-svcacct-", "sk-admin-"}, {"xai-"}, {"AIza", "AQ."}, {"LLM|", "LLM_"}])
         for _, _, pattern in rows:
             self.assertIsInstance(pattern, re.Pattern)
         self.assertEqual(set(ProviderKeyMatcher.FORMAT_BOUND_PROVIDERS), {ModelProvider.ANTHROPIC, ModelProvider.XAI, ModelProvider.GEMINI, ModelProvider.OPENROUTER, ModelProvider.META})
         self.assertEqual(tuple(ProviderKeyMatcher.RESERVED_PREFIXES), ())
         self.assertEqual((ProviderKeyMatcher.OPENAI_KEY_PREFIX, ProviderKeyMatcher.OPENAI_JWT_PREFIX), ("sk-", "eyJ"))
+
+    def test_the_meta_row_is_the_section_8_5_row_and_every_other_row_keeps_its_rule(self) -> None:
+        # meta-muse-managed-text section 8.5, D-8, D-9, INV-17: the Meta
+        # row proves both shapes with one pattern; the other five rows
+        # keep base_commit's prefixes, patterns and flags, so only keys
+        # that start with LLM_ match differently.
+        from vidbyte.lib.registries.provider_keys import ProviderKeyMatcher
+
+        rows = {ModelProvider(provider): (tuple(prefixes), pattern) for provider, prefixes, pattern in ProviderKeyMatcher.KEY_FORMATS}
+        expected = {
+            ModelProvider.ANTHROPIC: (("sk-ant-",), r"sk-ant-[A-Za-z0-9_-]+"),
+            ModelProvider.OPENROUTER: (("sk-or-",), r"sk-or-[A-Za-z0-9_-]+"),
+            ModelProvider.OPENAI: (("sk-proj-", "sk-svcacct-", "sk-admin-"), r"sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]+"),
+            ModelProvider.XAI: (("xai-",), r"xai-[A-Za-z0-9_-]+"),
+            ModelProvider.GEMINI: (("AIza", "AQ."), r"(?:AIza[A-Za-z0-9_-]{35}|AQ\.[A-Za-z0-9_-]+)"),
+            ModelProvider.META: (("LLM|", "LLM_"), r"LLM(?:\|[0-9]+\|[A-Za-z0-9_-]+|_[0-9]+_[A-Za-z0-9_-]+)"),
+        }
+        self.assertEqual(set(rows), set(expected))
+        for provider, (prefixes, source) in expected.items():
+            with self.subTest(provider=provider.value):
+                self.assertEqual((rows[provider][0], rows[provider][1].pattern), (prefixes, source))
+                self.assertEqual(rows[provider][1].flags, re.compile(source).flags)
 
     def test_the_removed_methods_are_gone(self) -> None:
         # Section 9.2 "Removed": no alias survives (D-20).
@@ -96,9 +127,9 @@ class RecordLayoutTests(unittest.TestCase):
         from vidbyte.paradigms.context_minimal_fanout.types import AgentRoleSettings
 
         layouts = {
-            AgentRunnerConfig: (["api_keys", "provider", "model_name", "temperature", "run_id", "timeout_seconds", "model_mode"], ["api_keys"]),
+            AgentRunnerConfig: (["api_keys", "provider", "model_name", "temperature", "run_id", "timeout_seconds", "model_mode", "reasoning_effort"], ["api_keys"]),
             FallbackModel: (["provider", "model", "temperature"], []),
-            JevAgentSettings: (["name", "system_prompt", "provider", "model_name", "api_keys", "temperature", "timeout_seconds", "tools", "permission_policy", "loop", "agents", "bulk_work", "alignment", "outputs", "vidbyte_api_key", "model_mode", "system_prompt_presets"], ["api_keys", "vidbyte_api_key"]),
+            JevAgentSettings: (["name", "system_prompt", "provider", "model_name", "api_keys", "temperature", "timeout_seconds", "tools", "permission_policy", "loop", "agents", "bulk_work", "alignment", "outputs", "vidbyte_api_key", "model_mode", "system_prompt_presets", "reasoning_effort"], ["api_keys", "vidbyte_api_key"]),
             JevRunBriefSettings: (["provider", "model_name", "api_keys", "temperature", "every_iterations", "max_iterations", "max_tokens"], ["api_keys"]),
             AgentRoleSettings: (["name", "system_prompt", "runner", "provider", "model_name", "api_keys", "temperature", "tools", "middleware", "agent_options", "max_tokens", "vidbyte_api_key"], ["api_keys", "vidbyte_api_key"]),
         }
@@ -275,6 +306,53 @@ class ManualScriptTests(unittest.TestCase):
                         keywords = {keyword.arg for keyword in node.keywords}
                         self.assertNotIn("api_key", keywords, f"{relative}:{node.lineno}")
         self.assertGreater(configs, 0, "the scan found no TextModelConfig( call, so it proved nothing")
+
+
+class KeyFormatSourceTests(unittest.TestCase):
+    """meta-muse-managed-text AC-18, FR-9: the Meta key rule cites Meta's own page, in its code comment and in the registries README."""
+
+    def test_the_comment_above_the_meta_row_names_the_llm_shape_and_cites_metas_page(self) -> None:
+        # AC-18, section 12.3 row 4(b): the PEP 8 block directly above
+        # the row names both shapes and Meta's page with its read date,
+        # each line is at most 72 columns with its indent, and no
+        # example key is copied in.
+        lines = MATCHER_SOURCE.read_text(encoding="utf-8").splitlines()
+        rows = [index for index, line in enumerate(lines) if line.lstrip().startswith("(ModelProvider.META,")]
+        self.assertEqual(len(rows), 1, "KEY_FORMATS must hold exactly one Meta row")
+        start = rows[0]
+        while start > 0 and lines[start - 1].lstrip().startswith("#"):
+            start -= 1
+        block = lines[start:rows[0]]
+        self.assertTrue(block, "no comment sits directly above the Meta row")
+        for line in block:
+            with self.subTest(line=line.strip()[:40]):
+                self.assertLessEqual(len(line), 72)
+        text = " ".join(line.strip().lstrip("#").strip() for line in block)
+        for fact in ("LLM_", "LLM|", "https://dev.meta.ai/docs/authentication", "2026-10-17"):
+            with self.subTest(fact=fact):
+                self.assertIn(fact, text)
+        self.assertIsNone(META_EXAMPLE_KEY.search(text), "an example Meta key is copied into the comment")
+
+    def test_the_registries_readme_meta_row_quotes_metas_llm_sentence_and_keeps_the_older_source(self) -> None:
+        # AC-18, section 12.3 row 5: both patterns (the LLM_ one first,
+        # joined by "or" as the gemini row is), Meta's 2026-10-17
+        # sentence with its URL, the error page, #1027's 2026-10-15
+        # LLM| source kept, and no example key.
+        rows = [line for line in REGISTRIES_README.read_text(encoding="utf-8").splitlines() if line.startswith("| meta |")]
+        self.assertEqual(len(rows), 1, "table F must hold exactly one meta row")
+        facts = (
+            r"`LLM_[0-9]+_[A-Za-z0-9_-]+` or `LLM\\|[0-9]+\\|[A-Za-z0-9_-]+`",
+            "https://dev.meta.ai/docs/authentication",
+            "2026-10-17",
+            "API keys start with `LLM_`, followed by a numeric ID and the secret, separated by underscores",
+            "https://dev.meta.ai/docs/error-handling",
+            "2026-10-15",
+            "API keys look like this",
+        )
+        for fact in facts:
+            with self.subTest(fact=fact[:48]):
+                self.assertIn(fact, rows[0])
+        self.assertIsNone(META_EXAMPLE_KEY.search(rows[0]), "an example Meta key is copied into the README row")
 
 
 if __name__ == "__main__":

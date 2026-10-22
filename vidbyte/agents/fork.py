@@ -64,12 +64,15 @@ class AgentForker:
             # @intent children-carry-the-matched-keys
             # The child gets the parent's matched record and mode as
             # they are; each call sends only the key matched to its
-            # own provider, so no key crosses to another vendor.
+            # own provider, so no key crosses to another vendor. It
+            # keeps the parent's reasoning effort too, and its own
+            # construction re-checks that effort against its model.
             api_keys=agent.runner_config.api_keys,
             model_mode=agent.runner_config.model_mode,
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
             model_name=agent.runner_config.model_name if settings.model_name is None else settings.model_name,
             temperature=agent.runner_config.temperature if settings.temperature is None else settings.temperature,
+            reasoning_effort=agent.runner_config.reasoning_effort,
             timeout_seconds=agent.runner_config.timeout_seconds,
             run_id=child_run_id,
             description=agent.description,
@@ -162,6 +165,7 @@ class AgentForker:
             max_parallel_tool_calls=base.max_parallel_tool_calls,
             max_retries=base.max_retries,
             timeout_seconds=base.timeout_seconds,
+            max_spend_usd=base.max_spend_usd,
             context_window_budget=base.context_window_budget,
             compaction_trigger_tokens=base.compaction_trigger_tokens,
             compaction_target_tokens=base.compaction_target_tokens,

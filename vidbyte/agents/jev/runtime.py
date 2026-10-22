@@ -213,10 +213,20 @@ class JevRuntime(AgentRuntime):
         return replace(context, tools=self.tools.specs()), run_options
 
     async def _delegate(self, message: str, context: BaseAgentContext) -> AgentResult:
-        # Applies the run-state relation policy before handing the request to the specialist the gate chose.
+        # Applies the run-state relation policy before handing the
+        # request to the specialist the gate chose, and checks the spend
+        # cap before the specialist starts.
         if self.run_state is not None:
             await self.run_state.begin_delegated(message, prior_user_turns=self._prior_user_turns(context.history))
             self.usage.require_accounted()
+        # @intent a-reached-cap-starts-no-specialist
+        # The specialist's own cap starts at $0 on its own ledger and
+        # never sees the gate's or the run-state writer's spend, so only
+        # this check stops a run whose measured spend has already
+        # reached the cap.
+        spend_stop = self._spend_cap_stop(iteration_count=0, tokens_used=None, contexts=())
+        if spend_stop is not None:
+            return self.response.finished(spend_stop, self.usage.settle())
         reply = await self.preflight.specialist.agent.arun(message)
         return self.response.delegated(reply, self.usage.settle())
 
