@@ -1,7 +1,7 @@
 ---
 spec: agent-swarm-v2
 title: AgentSwarm revision: one shared prompt, loose messaging, per-agent compaction, generous limits, full event visibility
-status: verified
+status: pr-open
 revision: 7
 repo: C:/Users/422mi/vidbyte-repos/vidbyte-sdk
 worktree: C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm-v2
@@ -9,7 +9,7 @@ branch: feat/agent-swarm
 base_commit: 39ce8b20baf28690a3dc74b8fbdca9530119fdef
 created: 2026-10-19
 updated: 2026-10-21
-pr: https://github.com/cerredz/Vidbyte-SDK/pull/1174   # revised in place; finalized at S6
+pr: https://github.com/cerredz/Vidbyte-SDK/pull/1174
 ---
 
 # Spec: AgentSwarm revision: one shared prompt, loose messaging, per-agent compaction, generous limits, full event visibility
@@ -145,8 +145,10 @@ flowchart TD
   F -->|compact tool| K[AgentSwarmRuntime.request_compaction]
   F -->|_after_tool_iteration: compact if due, then mail| L[AgentSwarmHandoffSummarizer via ContextCompactionEngine]
   L -->|compaction, model_called| D
-  C -->|_end_reason or budget or timeout| M[_stop: swarm_stopping, message_undelivered, release waiters]
-  M -->|agent_released / agent_cancelled / agent_failed / agent_exited| D
+  F -->|_run_member: the run returns or raises| P[agent_released / agent_cancelled / agent_failed / agent_exited]
+  P --> D
+  C -->|_end_reason after a turn end or an agent leaves, the budget in record_model_call, or the time limit| M[_stop: agent_cancelled on the time limit for tasks never started, swarm_stopping, message_undelivered, release waiters]
+  M --> D
   D -->|flush in order| N[on_event callback]
   C -->|swarm_ended last| O[AgentSwarmResult]
 ```
@@ -179,7 +181,7 @@ sequenceDiagram
   RT-->>Dev: AgentSwarmResult
 ```
 
-Validation happens once, in `AgentSwarmSettings.__post_init__` (agents, folder, limits, web-search provider and key, keys matched to providers) and in `AgentSwarm.arun` (the goal is text), before any folder or agent exists. State changes only inside `AgentSwarmRuntime`, in blocks with no `await`: `post_message`, `collect_messages`, `end_turn`, `_fail`, `_stop`, `record_model_call`, `record_tool_outcome`, `request_compaction`, and `record_compaction` each record their events in the same block and then await one flush. Failures are caught per member in `_run_member` (an SDK error, a stray cancel, an early exit) and never stop the others; a callback exception is kept by type name in the outbox; a failed summary call is recorded as `model_error` and the history is kept. The shared loop is never edited: the observer, trim, and turn middleware and the member runtime's `_after_tool_iteration` are the only code that runs inside a member's loop.
+Validation happens once, in `AgentSwarmSettings.__post_init__` (agents, folder, limits, web-search provider and key, keys matched to providers) and in `AgentSwarm.arun` (the goal is text), before any folder or agent exists. State changes only inside `AgentSwarmRuntime`, in blocks with no `await`: `post_message`, `collect_messages`, `end_turn`, `record_model_call`, `record_tool_outcome`, and `record_compaction` each record their events in the same block and then await one flush; `_fail` and `_stop` record theirs inside their caller's block, and `request_compaction` records nothing: it keeps the focus and flushes. Failures are caught per member in `_run_member` (an SDK error, a stray cancel, an early exit) and never stop the others; a callback exception is kept by type name in the outbox; a failed summary call is recorded as `model_error` and the history is kept. The shared loop is never edited: the observer, trim, and turn middleware and the member runtime's `_after_tool_iteration` are the only code that runs inside a member's loop.
 
 ---
 
@@ -1076,6 +1078,7 @@ _Tests (`tests/features/agent_swarm/*`, `FEATURE.md`, `README.md`) are the S2 te
 | r5 | 2026-10-21 | S5 repair 1 | Spec text brought in line with the repaired code: `_end_reason` decides the stop reason and its callers pass it to `_stop` (§5, INV-12, EC-11, EC-13, EC-14, §8.2, §8.5); §8.5 shows `_estimate`, `_measured_context(estimate)` and the hysteresis state; A-12 records the dense-script limit of estimate-counted growth (S5 O-1); Q-6..Q-9 carry the four `[scope-adding]` follow-ups (S4 R-17, R-18, R-19; S5 O-1), each defaulting to no. No behavior change. |
 | r6 | 2026-10-21 | S5 re-review 1 | Spec text drift closed (re-review R-C3): §8.5 lists `_refuse`, `_changed_path`, `_command_failure` and the four R-15 constants; §8.4 and §9.1 name the member's `_compacted_estimate`; D-10 and AC-17 state INV-32's growth condition. No behavior change. |
 | r7 | 2026-10-21 | S5 re-review 2 | Re-review round 2 verdict SOUND (0 Blocker, 0 Major). AC-17's proof cell names the three tests of its r6 growth branch (re-review 2 R-C3). |
+| r7 | 2026-10-21 | S6 PR | finalized for review. Status `pr-open`, PR #1174. §5 drift fixed to match the code and the PR's flow chart: the four agent endings come from `_run_member`, not `_stop`, which records `agent_cancelled` only on the time limit for tasks that never started; the prose no longer says `request_compaction` records events (it records none and flushes) and says `_fail` and `_stop` record inside their caller's block. No behavior change. |
 
 ### Implementation deviations (S3)
 
