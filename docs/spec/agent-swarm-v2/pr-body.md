@@ -198,21 +198,22 @@ Test paths are under `tests/features/agent_swarm/`. Every named test exists on t
 
 ## Verification
 
-Local runs are on `c86dda43`, which has the same product tree as this head. They ran from the worktree with `PYTHONPATH=<worktree>`, with no network and no real model.
+Local runs are on `c86dda43` unless a row says otherwise. Two later product commits, `40c443a3` and `79a3bced`, reword only a docstring, a comment and the file header of `agent_swarm_observer.py` (R-5). The pack, prompt parity and lint were re-run on them. They ran from the worktree with `PYTHONPATH=<worktree>`, with no network and no real model.
 
 | Gate | Command | Result |
 |---|---|---|
-| Swarm pack | `python -m pytest tests/features/agent_swarm -q -p no:cacheprovider` | `281 passed in 7.75s` |
-| Pack + prompt parity | `python -m pytest tests/features/agent_swarm tests/test_prompts_interface.py -q -p no:cacheprovider` | `286 passed in 7.98s` |
+| Swarm pack | `python -m pytest tests/features/agent_swarm -q -p no:cacheprovider` | `281 passed in 7.75s`; again `281 passed` on `40c443a3` |
+| Pack + prompt parity | `python -m pytest tests/features/agent_swarm tests/test_prompts_interface.py -q -p no:cacheprovider` | `286 passed in 7.98s`; again `286 passed in 7.34s` on `79a3bced` |
 | AC-1 snippet | `python -m pytest "tests/features/agent_swarm/test_agent_swarm_acceptance.py::test_the_section_4_snippet_runs_as_written" -q` | `1 passed in 0.78s` |
 | Codex host (merge fix) | `python -m pytest tests/features/codex_host -q -p no:cacheprovider` | `215 passed in 15.36s` |
-| Lint | `python lint/run.py` | `SDK-LINT: PASS` |
+| Lint | `python lint/run.py` | `SDK-LINT: PASS`, also on `40c443a3` and `79a3bced` |
 | Lint, every finding | `python lint/run.py --all --format json` | Exit 0: 91 rules (48 CLEAN, 36 RATCHETED, 7 IMPROVED) and 3,937 findings. One finding names a swarm line: S051 (ruff I001) at `vidbyte/lib/registries/runtimes.py:33`, in an import block that already fails I001 on main. S051 sits at its baseline, 259 of 259. |
 | Public API | `python scripts/generate-sdk-public-api.py --check` | `contracts/sdk-public-api.json is current at 654deee6d2893e83f67164bd331e0f92c941cd85 (vidbyte-sdk 0.4.0, 742 exports).` |
 | Source stage | `python scripts/run_ci.py --stage source` | `SDK-LINT: PASS` … `2 failed, 8666 passed, 18 skipped in 294.59s`, then `CI failed: Command failed with exit code 1: … -m pytest`. The 2 are main's `test_harness_threads_surface.py::test_branch_leaves_the_tools_and_configs_packages_as_main_has_them` and `::test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded`. Both diff the checkout against `origin/main` and assert that a branch leaves `vidbyte/tools` and the root `__all__` as main has them. Any branch that adds a toolset or root exports fails them. CI's shallow clone has no `origin/main`, so they skip there (`merge_base()` calls `pytest.skip`). |
-| Package stage | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `CI passed.` (orchestrator, on the merge `fc89377b`; nothing under `vidbyte/` or in `pyproject.toml` has changed since) |
+| Package stage | `python scripts/run_ci.py --stage package` (no `PYTHONPATH`) | `CI passed.` (orchestrator, on the merge `fc89377b`; since then only `40c443a3` and `79a3bced` have changed `vidbyte/`, in comments and docstrings, and remote Package re-ran after each) |
 | Semgrep | `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte` | `Ran 1 rule on 1047 files: 0 findings.` (orchestrator, on the merge; re-run remotely by Static policy) |
-| Remote, last product commit `9ed61e09` | `gh workflow run ci.yml` / `static-policy.yml --ref feat/agent-swarm` | CI 39704722109 `success` (Source 3.11, Source 3.12, Package); Static policy 39704724215 `success` |
+| Remote, merge fix `9ed61e09` | `gh workflow run ci.yml` / `static-policy.yml --ref feat/agent-swarm` | CI 39704722109 `success` (Source 3.11, Source 3.12, Package); Static policy 39704724215 `success` |
+| Remote, `40c443a3` | same | CI 39708907386 `success` (Source 3.11, Source 3.12, Package); Static policy 39708910629 `success` |
 | Remote, this head | same, dispatched after the push | Dispatched on the commit that adds this file. Its run IDs are filled in on the GitHub copy of this body, because a commit cannot name its own runs. |
 
 This repo runs no checks on pull requests by itself, so `gh pr checks` is empty by design. Each run above was dispatched by hand, and its `headSha` was checked against the pushed head.
@@ -227,7 +228,7 @@ Three reviewers covered three lenses (spec conformance, repo conventions, engine
 | R-2 (Blocker) | Both size estimates read only `message["content"]`. Gemini `parts` and OpenAI `tool_calls` counted 0 tokens, so those histories never compacted. Estimates now count the whole message. | `8e56aaea`; tests `77606b69` |
 | R-3 (Blocker) | 52 comment lines were wider than 72 columns, hidden by the pack's 400-line module check. They are rewrapped, and `runtime.py` gets a 500-line limit. | `6455f9e9`; test limit `c9a5d0db` |
 | R-4 (Major) | Three new policy functions had no `@intent` comment. A002 reported them, but its IMPROVED ratchet printed PASS. | `a12973e7` |
-| R-5 (Major) | The spec and docs claimed the loop retries model errors, which it does not. The wording is fixed, and the README now says the first provider error fails the agent. | `360ceab1`; spec `79f378cf`; test docstring `2f346592` |
+| R-5 (Major) | The spec and docs claimed the loop retries model errors, which it does not. The wording is fixed, and the README now says the first provider error fails the agent. | `360ceab1`; spec `79f378cf`; test docstring `2f346592`; observer text `40c443a3`, `79a3bced` |
 | R-6 (Major) | Automatic compaction had no hysteresis: a large fixed prompt paid for a summary on every iteration. A repeat automatic compaction now waits for 27,000 tokens of growth. | `81b0672e`; tests `50280d62`; READMEs `2567874f`, `6d604082` |
 | R-7 (Major) | Three spec-pinned lines could be deleted with the pack still green: the stop guard on compaction, the same-writer peer rule, and the side-call tokens. Three tests now kill those mutants. | tests `78b067d1` |
 | R-20 (Major, re-review 1) | No test pinned the whole-message estimate in the no-usage fallback and the growth check. Two Gemini tests now pin it. | tests `ce8053ed` |
@@ -262,10 +263,9 @@ None of these is built. Each one is the owner's decision.
 6. **Confirm the agent cap.** The answer said "max agents 5,00", which was read as 500. Another cap is a one-constant change to `AGENT_SWARM_MAX_AGENTS`.
 7. **Main's branch-scoped tests.** The two `harness_threads` surface tests fail locally on any branch that adds a toolset or root exports. They belong scoped to their own PR, or removed from main.
 8. **Import order.** S2 noted that ruff's default import-order warnings in the tests are not a gate. S051 I001 at `vidbyte/lib/registries/runtimes.py:33` sits in a block main already fails, so it is best fixed on main.
-9. **Wording.** `AgentSwarmObserverMiddleware.on_model_error`'s docstring (`vidbyte/middleware/builtins/agent_swarm_observer.py:61`) still says to "let the loop's own retry and fallback decide". AgentSwarm installs none (R-5).
-10. **Empty summary.** When the summary call succeeds but returns no text, the older history is still replaced by the summary prefix alone (`vidbyte/agents/agent_swarm/compaction.py:59-60`). Spec EC-24 accepts this on purpose, since the goal, the kept newest messages, and the folder remain. If you would rather keep the history, a guard that treats an empty summary like a failed one would cost about 2 lines.
-11. **Native compaction (Q-3).** An Anthropic-native compaction fast path behind the same seam is a possible next PR.
-12. **Known limitations, documented in the package README:**
+9. **Empty summary.** When the summary call succeeds but returns no text, the older history is still replaced by the summary prefix alone (`vidbyte/agents/agent_swarm/compaction.py:59-60`). Spec EC-24 accepts this on purpose, since the goal, the kept newest messages, and the folder remain. If you would rather keep the history, a guard that treats an empty summary like a failed one would cost about 2 lines.
+10. **Native compaction (Q-3).** An Anthropic-native compaction fast path behind the same seam is a possible next PR.
+11. **Known limitations, documented in the package README:**
     - `bash` is not confined and inherits the environment.
     - Concurrent edits to one file can collide.
     - Writes made through `bash` never appear as `file_changed`.
