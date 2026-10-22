@@ -130,3 +130,114 @@ Only the pack, `test-plan.md` and (in the next commit) this report change. No `v
 4. **R-9.** Once the swarm is stopping, record no `history_trimmed`. Either skip the trim or trim without recording it; both pass. The trim before the stop must still record `[(True, 2)]`, and the test asserts that first.
 5. **R-7.** The three new tests pass now. They are there to keep three spec-pinned lines from being deleted: no compaction while stopping, no peer when an agent rewrites its own file, and the side call's tokens added to `tokens_used`. A repair that breaks any of those lines turns its test red.
 6. **R-3.** `runtime.py` may grow to 500 lines after its header. Every other budget module stays at 400.
+
+## Round 2 (spec r6, S5 iteration 2): R-20 and R-21
+
+Base `ee7e06e8` (product code unchanged since `04cf9caa`) · Test commits `ce8053ed` (R-20), `b4dc91d0` (R-21). All five new cases pass on the repaired code. None is red, because this round only adds tests for behavior the repair already has.
+
+The re-review found three mutants that left the pack green. Each now fails a new test on its own product assertion. No existing assertion changed, and nothing was skipped, xfailed or deleted.
+
+### Changes and their commits
+
+| Finding | Commit | What changed |
+|---|---|---|
+| R-20 | `ce8053ed` | Two Gemini tests in `test_agent_swarm_compaction.py`. They reach the two paths of `_estimate` that no test reached. **Growth check:** `test_a_gemini_member_compacts_again_each_time_its_parts_history_grows_by_the_target`. The provider reports the trigger on every call and builder makes fourteen 30,000-character reads. Summary calls must follow loop calls `[4, 8, 12]`, with compactions `(auto, "", 72000, 2|9|9)` and no `history_trimmed`. **Fallback:** `test_a_gemini_member_whose_provider_reports_no_usage_compacts_when_its_estimate_reaches_the_trigger`. Builder makes five 60,000-character reads with `usage={}`. The `model_called` events are zeros, the one summary call follows loop call 5, and the compaction is `(auto, "", <the member's _estimate of the history at that check>, 8)`. The commit also adds three leaf helpers (`_write_parts`, `_gemini_builder`, `_is_side_call`). test-plan.md:83 (the R-2 Gemini row) now claims only the keep count, with the mutant it kills (`keep_content_only`), and points to the two R-20 rows. |
+| R-21 | `b4dc91d0` | **Restart:** `test_a_compact_request_restarts_the_growth_an_automatic_compaction_waits_for`. A `compact` request is builder's first compaction, and loop calls 3 and 4 report the trigger. Summary calls must follow loop calls `[2, 4]`: `(tool, "", 3, 2)`, then `(auto, "", 72000, 6)`. **Boundary:** `test_a_repeat_automatic_compaction_is_due_at_exactly_the_target_of_growth_and_not_one_token_below`, with rows `exactly-the-target` and `one-below`. After the first compaction, builder's last read is sized as it asks for it, so that the history grows by exactly 27,000 tokens, or 26,999, by the member's own static `_estimate` (spec §8.5). The test asserts that growth before the outcome. Exactly the target must compact at iteration 4, dropping 3. One token less must not compact. The fixture change: `ToolStep` and `tool_call` take an optional `call_id` (default `""` keeps the session-wide counter), which all three provider shapes honor. A test-plan section, "Amendment run 2", is added. |
+
+Each commit also carries its bookkeeping:
+- the compaction module's PURPOSE, ROLE (now spec r6, S5 re-review R-20, R-21), FUNCTION INVENTORY and KNOWN EDGE CASES. The inventory now also lists the older `_next_own` and `_is_summary`, which it omitted.
+- the fixtures header (FUNCTION INVENTORY, KNOWN EDGE CASES);
+- the README File Index and a 2026-10-21 Logs entry;
+- the FEATURE.md failure modes, Test Suite Map, fixture line and Historical Regressions;
+- one test-plan row per new test, and the header and Pack lines.
+
+### Why the oracles are exact but do not depend on the `str(message)` formula
+
+INV-33 says what the estimate counts (whole messages), not its exact text. So each oracle is exact, but none of them pins the `str(message)` formula:
+- Every count-based threshold has thousands of tokens of margin.
+- The two values that only the estimate defines are taken from the member's own `AgentSwarmMemberRuntime._estimate`. These are the fallback's `input_tokens` and the growth at the exact-target boundary.
+
+I checked this with an in-memory plugin, `<SCRATCH>/s2amend2/plug/s2v_alt_estimate.py`, that swaps in three other correct whole-message estimates: JSON per message, the whole list as one JSON text, and the message's string values only. All five new cases pass under each (`2 passed` for R-20 and `3 passed` for R-21, per variant).
+
+The boundary test fixes its two reads' call ids. Ids from the session-wide counter would otherwise make its outcome depend on test order, because an id can gain a digit between two calls (for example 999 to 1000). The boundary test passes alone (`2 passed`) and in the full pack.
+
+### Proof
+
+**1. Full pack at `b4dc91d0`:**
+
+```
+PYTHONPATH="C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm-v2" python -m pytest tests/features/agent_swarm -q -p no:cacheprovider
+280 passed in 7.17s
+```
+
+This is 275 earlier cases plus 5 new ones, all green.
+
+**2. The three re-review mutants now fail new tests.** The command is `RR1MUT=<id> PYTHONPATH="<WT>;<SCRATCH>/rereview1/mut" python -m pytest tests/features/agent_swarm -q -p no:cacheprovider -p rr1mut`.
+
+```
+estimate_content_only  3 failed, 277 passed in 6.75s
+  FAILED test_agent_swarm_compaction.py::test_a_gemini_member_compacts_again_each_time_its_parts_history_grows_by_the_target
+         E  AssertionError: summary side calls followed loop calls [4]
+  FAILED test_agent_swarm_compaction.py::test_a_gemini_member_whose_provider_reports_no_usage_compacts_when_its_estimate_reaches_the_trigger
+         E  AssertionError: summary side calls followed loop calls []
+  FAILED test_agent_swarm_compaction.py::test_a_repeat_automatic_compaction_is_due_at_exactly_the_target_of_growth_and_not_one_token_below[exactly-the-target]
+snapshot_only_auto     1 failed, 279 passed in 6.66s
+  FAILED test_agent_swarm_compaction.py::test_a_compact_request_restarts_the_growth_an_automatic_compaction_waits_for
+         E  AssertionError: summary side calls followed loop calls [2, 3]
+growth_strict_gt       1 failed, 279 passed in 6.67s
+  FAILED test_agent_swarm_compaction.py::test_a_repeat_automatic_compaction_is_due_at_exactly_the_target_of_growth_and_not_one_token_below[exactly-the-target]
+         E  AssertionError: summary side calls followed loop calls [2]
+```
+
+Under `estimate_content_only`, the boundary test's own measurements use the mutated estimate, so its growth still lands on the target. The failure comes after that: the content-only growth disagrees with the whole-message keep count, so `messages_dropped` is 5, not 3.
+
+I also ran a mutant of my own, in memory: `growth_minus_one`, where growth one token short of the target counts. Only the `one-below` row catches it (`1 failed, 279 passed`, `summary side calls followed loop calls [2, 4]`).
+
+**3. The earlier mutants keep their verdicts.** I ran all 31 mutants before (`ee7e06e8`) and after (`b4dc91d0`): 16 `S4MUT` and 15 `RR1MUT`. The three `end_reason_*` mutants ran with `-x`, as in the re-review, because they leave a swarm that never stops.
+- Before: 27 killed and 4 survivors (`keep_last_zero`, `snapshot_only_auto`, `growth_strict_gt`, `estimate_content_only`).
+- After: 30 killed. The only survivor is `keep_last_zero`, the known equivalent mutant (`280 passed in 6.55s`; spec EC-27 and the test plan say why).
+- No failing test was lost: each mutant's set of failing tests after is a superset of its set before.
+- The spot checks asked for:
+
+```
+S4MUT=compact_while_stopping      1 failed, 279 passed in 6.71s   test_agent_swarm_stop.py::test_a_compact_request_pending_at_the_stop_makes_no_summary_call_and_records_no_compaction
+S4MUT=self_writer_as_peer         1 failed, 279 passed in 6.70s   test_agent_swarm_observer.py::test_one_agent_writing_one_file_twice_records_file_changed_with_no_peer_both_times
+S4MUT=side_call_tokens_not_added  1 failed, 279 passed in 6.67s   test_agent_swarm_compaction.py::test_the_summary_call_tokens_are_added_to_the_members_tokens_used
+RR1MUT=keep_content_only          4 failed, 276 passed in 6.76s   the two R-2 tests (as before) + the two R-20 tests
+```
+
+Several killed mutants now also fail the new tests, which adds evidence for each kill:
+- `hyst_off`, `snapshot_before`, `snapshot_never` and `growth_from_trigger` fail 3 more tests each.
+- `dropped_no_plus_one` and `side_call_not_budgeted` fail 5 more each.
+- `trim_records_unchanged` fails 2 more.
+
+**4. Lint:**
+
+```
+python lint/run.py                      -> exit 0, last line: SDK-LINT: PASS
+python lint/run.py --format json --all  -> exit_code 0; 90 rules: 47 CLEAN, 35 RATCHETED, 8 IMPROVED, 0 failing;
+                                           3,896 findings, 89 under tests/, 0 under tests/features/agent_swarm
+```
+
+Ruff is not a repo gate. Its default run goes from 17 to 21 findings in the pack. The 4 new ones are `I001` on the new tests' function-level imports, the pack's existing pattern.
+
+**5. Diff since `ee7e06e8` (before this report):**
+
+```
+git -C <WT> diff ee7e06e8..HEAD --stat
+ docs/spec/agent-swarm-v2/test-plan.md              |  27 ++-
+ tests/features/agent_swarm/FEATURE.md              |   8 +-
+ tests/features/agent_swarm/README.md               |   5 +-
+ tests/features/agent_swarm/agent_swarm_fixtures.py |  18 +-
+ .../agent_swarm/test_agent_swarm_compaction.py     | 203 ++++++++++++++++++++-
+ 5 files changed, 242 insertions(+), 19 deletions(-)
+```
+
+`git diff 04cf9caa..HEAD -- vidbyte/` is empty. The working tree is clean apart from this report, which the next commit adds.
+
+### Notes for the next stage
+
+1. No product change is needed for R-20 or R-21, and none was made. The repaired code already passes all 280 cases.
+2. The R-20 fallback test and the R-21 boundary test call `AgentSwarmMemberRuntime._estimate` as their measuring instrument; spec §8.5 names it `static _estimate(messages) -> int`. If it is renamed or made an instance method, update those two tests. Do not change their thresholds.
+3. A test that sizes a message to the exact token needs `tool_call(..., call_id="...")`. Ids from the counter vary with test order.
+4. Process note: my first baseline loop was stopped while it ran, but its shell kept going and appended four more lines to the baseline file while the tests were being edited. Those lines were discarded. The "before" verdicts above come only from runs that finished on the unmodified tree.
