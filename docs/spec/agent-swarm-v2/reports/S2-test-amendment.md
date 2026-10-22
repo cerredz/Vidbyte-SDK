@@ -241,3 +241,89 @@ git -C <WT> diff ee7e06e8..HEAD --stat
 2. The R-20 fallback test and the R-21 boundary test call `AgentSwarmMemberRuntime._estimate` as their measuring instrument; spec §8.5 names it `static _estimate(messages) -> int`. If it is renamed or made an instance method, update those two tests. Do not change their thresholds.
 3. A test that sizes a message to the exact token needs `tool_call(..., call_id="...")`. Ids from the counter vary with test order.
 4. Process note: my first baseline loop was stopped while it ran, but its shell kept going and appended four more lines to the baseline file while the tests were being edited. Those lines were discarded. The "before" verdicts above come only from runs that finished on the unmodified tree.
+
+## Round 3 (spec r7, S5 iteration 3): R-23, R-24 and R-25
+
+Base `999e8b6c` (product code unchanged since `04cf9caa`). Test commits:
+- `4ba16310` (R-23, from re-review 2 R-C1)
+- `b527da49` (R-24, from R-C2)
+- `aa9db873` (R-25, from R-C3)
+
+No product edit, no push. No existing assertion was loosened except the one narrowing the coordinator granted for R-24, because that assertion was stricter than INV-33.
+
+### Changes and their commits
+
+| Item | Commit | What changed |
+|---|---|---|
+| R-23 | `4ba16310` | New test `test_the_growth_count_restarts_right_after_the_rewrite_so_mail_delivered_with_it_counts_as_growth`. Every call reports the trigger. builder's second response reads a 60,000-character file and messages itself a 60,000-character note, so iteration 2 compacts and then delivers the note. The note plus one more read pass the target; either alone does not, by thousands of tokens. The test first asserts its precondition: the note was delivered after the first compaction, and loop call 3 carries it last, after the summary. It then asserts summary calls after loop calls `[2, 3]`, compactions `(auto, "", 72000, 2)` then `(auto, "", 72000, 5)`, and no `history_trimmed`. Bookkeeping: test-plan row, header PURPOSE, ROLE and FUNCTION INVENTORY, README File Index and Logs, FEATURE.md failure mode, Test Suite Map and Historical Regressions. |
+| R-24 | `b527da49` | In `test_a_repeat_automatic_compaction_is_due_at_exactly_the_target_of_growth_and_not_one_token_below`, the second compaction is now compared on trigger, text and `input_tokens` only (`compactions[:1] + [found[:3] for found in compactions[1:]]`). The first compaction's whole tuple, both side-call schedules, the growth precondition and the `one-below` row are unchanged. The docstring, KNOWN EDGE CASES, the test-plan row, and test-plan.md:161's estimate-variant claim say why: at exactly the target, the new history sits exactly at the keep target, so the dropped count depends on how the keep count measures messages, which INV-33 leaves open. |
+| R-25 | `aa9db873` | Test plan only. The AC-17 row now also names the three growth tests, matching spec r7's Proof cell: `test_automatic_compaction_waits_for_a_target_of_new_history_and_a_compact_request_does_not`, `test_a_gemini_member_compacts_again_each_time_its_parts_history_grows_by_the_target`, and `test_a_repeat_automatic_compaction_is_due_at_exactly_the_target_of_growth_and_not_one_token_below` (2 rows). |
+
+### Proof (all at `aa9db873`)
+
+**1. Full pack:**
+
+```
+PYTHONPATH="C:/Users/422mi/vidbyte-repos/worktrees/vidbyte-sdk-agent-swarm-v2" python -m pytest tests/features/agent_swarm -q -p no:cacheprovider
+281 passed in 7.56s
+```
+
+**2. The requested mutant verdicts.** Before this round, at `999e8b6c`, `snapshot_after_mail` gave `280 passed` and `est_leaves` gave `1 failed, 279 passed` on `[exactly-the-target]`. After:
+
+```
+RR2MUT=snapshot_after_mail    1 failed, 280 passed in 6.73s
+  FAILED test_agent_swarm_compaction.py::test_the_growth_count_restarts_right_after_the_rewrite_so_mail_delivered_with_it_counts_as_growth
+         E  AssertionError: summary side calls followed loop calls [2, 4]
+RR2MUT=est_leaves             281 passed in 6.56s
+RR1MUT=growth_strict_gt       1 failed, 280 passed in 8.74s   [exactly-the-target] row
+RR1MUT=snapshot_only_auto     1 failed, 280 passed in 9.00s   test_a_compact_request_restarts_the_growth_an_automatic_compaction_waits_for
+RR1MUT=estimate_content_only  2 failed, 279 passed in 9.70s   the two R-20 Gemini tests
+```
+
+`estimate_content_only` drops from 3 to 2 failures. The one it no longer fails is the exact-target row, whose failure there came from the dropped count that R-24 removed. That failure was incidental, as R-C2 said; the two R-20 tests still fail for the right reason.
+
+**3. The S4 R-7 mutants each still give exactly 1 failed:**
+
+```
+S4MUT=compact_while_stopping      1 failed, 280 passed in 6.91s
+S4MUT=self_writer_as_peer         1 failed, 280 passed in 6.87s
+S4MUT=side_call_tokens_not_added  1 failed, 280 passed in 7.10s
+```
+
+Each fails the same single test as in round 2: the stop test, the self-writer observer test and the side-call token test.
+
+**All 41 mutants.** I ran every mutant: 16 `S4MUT`, 15 `RR1MUT` (the `end_reason_*` ones with `-x`) and re-review 2's 10 `RR2MUT`. Compared with round 2, no mutant lost a failing test, except that `estimate_content_only` lost the incidental one. Seven killed mutants now also fail the R-23 test: `dropped_no_plus_one`, `trim_records_unchanged`, `side_call_not_budgeted`, `hyst_off`, `snapshot_before`, `snapshot_never` and `growth_from_trigger`.
+
+Re-review 2's mutants give:
+- `fallback_zero`: 1 failed.
+- `growth_by_measured`: 5 failed.
+- `growth_minus_one`: 1 failed (the `one-below` row).
+- The five conformant pairings (`est_leaves`, `keep_leaves`, `keep_json`, `est_json`, `both_json`): `281 passed` each.
+- `keep_ge`: `281 passed`, the same as re-review 2 found. See the note below.
+- `keep_last_zero` (S4MUT) stays the known equivalent: `281 passed`.
+
+The R-23 test also passes under S2's three estimate variants (`S2V_EST=json|list|leaves`).
+
+**4. Lint:**
+
+```
+python lint/run.py                      -> exit 0, last line: SDK-LINT: PASS
+python lint/run.py --format json --all  -> exit_code 0; 90 rules: 47 CLEAN, 35 RATCHETED, 8 IMPROVED, 0 failing;
+                                           3,896 findings, 89 under tests/, 0 under tests/features/agent_swarm
+```
+
+**5. Diff since `999e8b6c` (before this report):**
+
+```
+git diff 999e8b6c..HEAD --stat
+ docs/spec/agent-swarm-v2/test-plan.md              | 11 ++--
+ tests/features/agent_swarm/FEATURE.md              |  5 +-
+ tests/features/agent_swarm/README.md               |  3 +-
+ .../agent_swarm/test_agent_swarm_compaction.py     | 58 +++++++++++++++++++---
+ 4 files changed, 63 insertions(+), 14 deletions(-)
+```
+
+### Notes
+
+1. Round 2's claim that the cases "pin INV-32 and INV-33, not the `str(message)` text" held only when the keep count measures new history no larger than the growth check does. My variants changed both estimates together, or only the growth check (the whole-list variant), so they never tried the pairing in which the growth check measures smaller. After R-24 the claim holds for every conformant pairing tried: S2's three and re-review 2's five.
+2. `keep_ge` (`_keep_last` stops when the kept estimate reaches the target, rather than passing it) survives the whole pack, before and after this round. It is visible only when a tool result brings the kept sum to exactly the target, because group rounding absorbs a cut at a call turn. A test could build that case with the exact-target method used in R-21. Neither re-review asked for it, so I left it as a possible follow-up.
