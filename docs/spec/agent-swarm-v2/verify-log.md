@@ -61,3 +61,17 @@ Gate set (from context/code-map.md §1 and the S5 briefing), in CI order, every 
 - Public API `--check`, package stage, and semgrep: their inputs (`vidbyte/`, `pyproject.toml`) are unchanged since 04cf9caa, where all three were green. Remote CI and Static policy re-run them on the pushed head.
 
 **Still open:** R-17, R-18, R-19 (`[scope-adding]`, Q-6..Q-8), and A-12 / Q-9 (limitation).
+
+## Iteration 3 — 2026-10-21 — tests only (S2 amendment round 3) after post-repair re-review 2 (SOUND)
+**Defects in:** re-review 2's three Minors: R-23 (restart point unpinned), R-24 (an assertion stricter than INV-33), R-25 (AC-17 proof cells).
+**Done:** S2 commits `4ba16310` (R-23, one new test), `b527da49` (R-24, a one-field narrowing granted by the orchestrator and citing INV-33), and `aa9db873` (R-25, test plan). Spec r7 (`999e8b6c`) fixes the spec half of R-25. No product change: `git diff 04cf9caa..HEAD -- vidbyte/ pyproject.toml` is empty.
+**Gate matrix (orchestrator runs at 3b2e48ca):**
+- Pack: `281 passed`. Lint: `SDK-LINT: PASS`.
+- Mutants:
+  - `snapshot_after_mail`: `1 failed`.
+  - `est_leaves`, conformant: `281 passed`.
+  - `growth_strict_gt`, `snapshot_only_auto`: `1 failed` each.
+  - `estimate_content_only`: `2 failed`.
+  - S2 swept all 41 mutants, and the only failure lost was `estimate_content_only`'s incidental exact-target kill, which R-24 removed on purpose.
+- Remote at `35b05f34`, which has the same product tree: CI 39698849230 and Static policy 39698851420 succeeded. The merge commit gets its own full gate run and dispatch.
+**Still open:** R-17, R-18, R-19 (Q-6..Q-8), R-26 (follow-up), and A-12 / Q-9 (limitation).
