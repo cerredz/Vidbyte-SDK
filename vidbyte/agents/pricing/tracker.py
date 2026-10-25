@@ -10,7 +10,9 @@ Architecture:
       calls (token axis) and priced search/fetch operations (operation axis) —
       priced via ModelPricingRegistry and OperationPricingRegistry.
 Key Functions:
-    - record_call: Parses, prices, and stores one model call of a given UsageKind.
+    - record_call: Parses, prices, and stores one model call of a given UsageKind;
+      with requested_model, a TypeSafe versioned answer the pricebook lacks is
+      priced as the requested model (ModelPricingRegistry.resolve_answered).
     - record_billed_failure: Prices and stores the usage a provider billed for a failed call.
     - record_operation: Prices and stores one search/fetch operation only with
       positive integer units and a finite cost.
@@ -73,28 +75,31 @@ class UsageTracker:
         # Returns whether any call this run swallowed an exception while recording usage.
         return self._recording_corrupted
 
-    def record_call(self, response: object, *, kind: UsageKind = UsageKind.GENERATIVE) -> UsageRecord | None:
+    def record_call(self, response: object, *, kind: UsageKind = UsageKind.GENERATIVE, requested_model: str | None = None) -> UsageRecord | None:
         # Parses, prices, and stores one model call; returns None when unusable.
         # The duck-typed response.provider is coerced to a ModelProvider once here,
         # so the pricing registry and parser downstream take only the strict enum.
+        # requested_model, which only DecisionModelRunner passes, lets a TypeSafe
+        # versioned answer the pricebook lacks be priced as the model it asked for.
         provider = _as_provider(getattr(response, "provider", None))
-        return self._record(provider, getattr(response, "model", ""), getattr(response, "usage", None), kind=kind, failed=False)
+        return self._record(provider, getattr(response, "model", ""), getattr(response, "usage", None), kind=kind, failed=False, requested_model=requested_model)
 
     def record_billed_failure(self, provider: ModelProvider | str, model: str, usage: Mapping[str, object], *, kind: UsageKind) -> UsageRecord | None:
         # Prices and stores the usage a provider billed for a call that then failed, marked failed=True.
         return self._record(_as_provider(provider), model, usage, kind=kind, failed=True)
 
-    def _record(self, provider: ModelProvider | None, model: object, payload: object, *, kind: UsageKind, failed: bool) -> UsageRecord | None:
+    def _record(self, provider: ModelProvider | None, model: object, payload: object, *, kind: UsageKind, failed: bool, requested_model: str | None = None) -> UsageRecord | None:
         # Parses and prices one call from the pricebook, then stores it; a call that leaves no record is counted.
         # @intent every-call-is-recorded-or-counted
         # A call with no parseable usage or an unknown provider is counted as unaccounted rather than dropped, and a
         # parse or pricing error marks the ledger corrupted, so a fail-closed owner can see every gap in its ledger.
+        # The record keeps the model that answered even when the pricebook priced it as the requested model.
         try:
             usage = _parse_usage(provider, payload)
             if usage is None or provider is None:
                 self._unaccounted_calls += 1
                 return None
-            cost = usage.cost_usd(self._pricing.resolve(provider, str(model)))
+            cost = usage.cost_usd(self._pricing.resolve_answered(provider, str(model), requested_model))
         except Exception:
             self.mark_recording_corrupted()
             return None

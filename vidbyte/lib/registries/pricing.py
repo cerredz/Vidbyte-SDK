@@ -21,20 +21,27 @@ Architecture:
 Key Functions:
     - default: Builds a registry over the built-in PROVIDER_PRICING table.
     - resolve: Returns the ModelPricing for a provider/model, or None.
+    - resolve_answered: Prices the model that answered a call; a TypeSafe
+      versioned answer ID the table lacks takes the requested model's price.
     - register: Adds or overrides rates for one provider/model entry.
 Relations:
     Consumed by vidbyte/agents/pricing (per-provider cost formulas) and by
-    UsageTracker, which prices each agent model call against the built-in table.
+    UsageTracker, which prices each agent model call against the built-in table
+    and prices Jev decision calls through resolve_answered with the model
+    DecisionModelRunner requested.
 Similar Files:
     - vidbyte/lib/registries/models.py
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import ClassVar
 
+from vidbyte.lib.constants.jev import JEV_VERSIONED_MODEL_ID
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
@@ -55,10 +62,12 @@ class ModelPricing:
     tier_rates: Mapping[str, Mapping[str, float]] | None = None
 
 
-PRICING_AS_OF: str = "2026-10-11"
+PRICING_AS_OF: str = "2026-10-25"
 PRICING_SOURCE_URL: str = "https://developers.openai.com/api/docs/pricing"
 
-# Rates verified against official provider pricing pages on PRICING_AS_OF.
+# Rates verified against official provider pricing pages. PRICING_AS_OF is the date
+# of the latest verified change to this table (lint C010), and the comment above each
+# provider block names the date its own rates were checked.
 # Providers/models with unverifiable rates are omitted so cost resolves to None
 # instead of a guessed number (OpenRouter marketplace models, and alias-only
 # default names such as grok-4 and openrouter/auto that do not name a priced SKU).
@@ -301,13 +310,17 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "mistral-large-4": ModelPricing(input_per_million=1.36, output_per_million=4.18, cache_read_per_million=0.14),
         "mistral-large-4-0": ModelPricing(input_per_million=1.36, output_per_million=4.18, cache_read_per_million=0.14),
     },
-    # TypeSafe Jev 1.13 (System One decision model), checked 2026-09-21 against
-    # https://docs.typesafe.ai/models.md: "$42 / $0.042" per Btok / per Mtok, "Charged per
-    # input token. Output tokens are free." The API reports only input_tokens and
-    # output_tokens (https://docs.typesafe.ai/api.md#response-body) and publishes no cached-
-    # token rate, so no cache_read rate applies. Responses name the versioned model that
-    # answered (jev-1.13.0), which the "jev-1.13" prefix prices; both aliases point to it.
+    # TypeSafe Jev 1.14 and 1.13 (System One decision models), fetched raw from
+    # https://docs.typesafe.ai/models.md at 2026-10-25T19:43:33Z: "| Model ID | `jev-1.14.0` |
+    # `jev-1.13.0` |", "| Price (per Btok / per Mtok) | \$42 / \$0.042 | \$42 / \$0.042 |",
+    # "Jev 1.14 is the newest Jev release, available from October 14, 2026." and "You pay per
+    # input token. Output tokens are free." The API reports only input_tokens and output_tokens
+    # (https://docs.typesafe.ai/api.md#response-body) and publishes no cached-token rate, so no
+    # cache_read rate applies. Responses name the versioned model that answered (jev-1.14.0),
+    # which the "jev-1.14" prefix prices; both aliases now point to it. A versioned answer this
+    # table lacks is priced as the requested model by resolve_answered().
     ModelProvider.TYPESAFE: {
+        "jev-1.14": ModelPricing(input_per_million=0.042, output_per_million=0.0),
         "jev-1.13": ModelPricing(input_per_million=0.042, output_per_million=0.0),
         "jev-latest": ModelPricing(input_per_million=0.042, output_per_million=0.0),
         "jev-preview": ModelPricing(input_per_million=0.042, output_per_million=0.0),
@@ -319,6 +332,8 @@ class ModelPricingRegistry:
     """Resolves (provider, model) pairs to ModelPricing with override support."""
 
     _EMPTY_TABLE: ClassVar[dict[str, ModelPricing]] = {}
+    # Providers whose responses name a versioned model ID, with that ID's documented shape.
+    _VERSIONED_ANSWER_IDS: ClassVar[Mapping[ModelProvider, re.Pattern[str]]] = MappingProxyType({ModelProvider.TYPESAFE: JEV_VERSIONED_MODEL_ID})
 
     def __init__(self, table: Mapping[ModelProvider, Mapping[str, ModelPricing]] | None = None) -> None:
         # Copy the source table so register() never mutates shared class state.
@@ -356,6 +371,24 @@ class ModelPricingRegistry:
         if not prefix_matches:
             return None
         return max(prefix_matches, key=lambda item: len(item[0]))[1]
+
+    def resolve_answered(self, provider: ModelProvider, answered_model: str, requested_model: str | None) -> ModelPricing | None:
+        # Returns the price of the model that answered a call; a versioned answer the table lacks takes the requested model's price.
+        # @intent versioned-answer-is-priced-as-the-requested-model
+        # TypeSafe answers an alias such as jev-latest with the versioned ID that served it, and moves the alias on
+        # each release (jev-1.13.0 to jev-1.14.0 on 2026-10-14). Until this table gains the new release, its billed
+        # answers would be unpriced and fail every JevAgent run closed after the spend. Vidbyte's gateway metering
+        # bills the same way: the answer's own price when known, else the price of the model the caller requested.
+        # The fallback is narrow on purpose: only a provider listed in _VERSIONED_ANSWER_IDS, only an answer ID of
+        # its documented versioned shape, and only to a requested model this table prices, so a request for an
+        # unpriced model, or an answer of any other shape, still resolves to None and fails closed.
+        answered = self.resolve(provider, answered_model)
+        if answered is not None or requested_model is None:
+            return answered
+        versioned = self._VERSIONED_ANSWER_IDS.get(provider) if isinstance(provider, ModelProvider) else None
+        if versioned is None or not isinstance(answered_model, str) or versioned.fullmatch(answered_model.strip()) is None:
+            return None
+        return self.resolve(provider, requested_model)
 
     @staticmethod
     def _is_release_suffix(remainder: str) -> bool:
