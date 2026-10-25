@@ -192,7 +192,7 @@ class DecisionFoundationTests(unittest.IsolatedAsyncioTestCase):
     def test_versioned_and_alias_models_are_priced(self) -> None:
         # [Silent Failure] responses name the versioned model, which must not fall out of the price table.
         registry = ModelPricingRegistry.default()
-        for model in ("jev-1.13.0", "jev-latest", "jev-preview"):
+        for model in ("jev-1.14.0", "jev-1.13.0", "jev-latest", "jev-preview"):
             with self.subTest(model=model):
                 pricing = registry.resolve(ModelProvider.TYPESAFE, model)
                 self.assertIsNotNone(pricing)

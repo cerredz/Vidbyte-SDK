@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Mirrors EmbeddingModelRunner: the runner owns config validati
 COMMON MODIFICATION PATTERNS: Keep provider calls as thin pass-throughs; request shaping belongs to vidbyte/lib/dataclasses/jev.py and wire handling to vidbyte/providers/typesafe.py. Put shared question scoring in vidbyte/lib/jev/decision.py.
 KNOWN EDGE CASES: Construction raises ConfigurationError when no API key resolves, which callers that must fail open treat as "decision model unavailable". DecisionModelHelper.score_noul needs no key and returns None when any named answer is missing or is not a noul answer.
 RELATED DOCS: docs/design/jev-agent-scaffold.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/features/sdk_model_usage/test_jev_versioned_answer_pricing.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -43,6 +43,10 @@ class DecisionModelRunner:
         # @intent every-jev-call-reaches-the-run-ledger
         # Every Jev call, from DecisionModelHelper or a direct runner caller, passes through here, so this is the one
         # place a decision call is metered; a failed call that TypeSafe still billed is recorded before it propagates.
+        # @intent a-new-jev-release-never-unprices-a-billed-answer
+        # The answer names the versioned model that served it (jev-1.14.0 for a jev-latest request), so the ledger is
+        # also told which model was requested: a release the pricebook has not caught up with is then priced as that
+        # model, matching how Vidbyte's gateway bills it, instead of failing the whole JevAgent run after the spend.
         ledger = active_usage_ledger()
         try:
             response = await self._provider.run_decision(request=request, transport=self._transport, config=self._config)
@@ -52,7 +56,7 @@ class DecisionModelRunner:
                 ledger.record_billed_failure(self._provider.provider, self._config.model, billed, kind=UsageKind.DECISION)
             raise
         if ledger is not None:
-            ledger.record_call(response, kind=UsageKind.DECISION)
+            ledger.record_call(response, kind=UsageKind.DECISION, requested_model=self._config.model)
         return response
 
     async def alist_models(self) -> tuple[JevModelCard, ...]:

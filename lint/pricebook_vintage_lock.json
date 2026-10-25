@@ -6,8 +6,8 @@
       "source": "vidbyte/lib/registries/pricing.py",
       "table": "PROVIDER_PRICING",
       "vintage_constant": "PRICING_AS_OF",
-      "vintage": "2026-10-11",
-      "fingerprint": "49bf9bcfb2be238acb71e427f06f667d",
+      "vintage": "2026-10-25",
+      "fingerprint": "33d93bb4945d232ccc262445fd8cda77",
       "entries": {
         "ANTHROPIC/claude-fable-5": "3d0111e8eca2e0dc",
         "ANTHROPIC/claude-fable-5-1": "ea6165f43f451c57",
@@ -78,6 +78,7 @@
         "OPENAI/gpt-6-sol": "1bb058f883f22bca",
         "OPENAI/gpt-6.1-sol": "5840586599c18800",
         "TYPESAFE/jev-1.13": "eaeb417eef301419",
+        "TYPESAFE/jev-1.14": "eaeb417eef301419",
         "TYPESAFE/jev-latest": "eaeb417eef301419",
         "TYPESAFE/jev-preview": "eaeb417eef301419",
         "XAI/grok-4.3": "716003b7e888c02e",

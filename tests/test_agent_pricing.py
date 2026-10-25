@@ -222,6 +222,7 @@ class PricingPrefixFallbackTests(unittest.TestCase):
             (ModelProvider.ANTHROPIC, "claude-haiku-4-5-20251001", "claude-haiku-4-5"),
             (ModelProvider.XAI, "grok-4.5-latest", "grok-4.5"),
             (ModelProvider.TYPESAFE, "jev-1.13.0", "jev-1.13"),
+            (ModelProvider.TYPESAFE, "jev-1.14.0", "jev-1.14"),
         ):
             expected = registry.resolve(provider, base)
             self.assertIsNotNone(expected, base)

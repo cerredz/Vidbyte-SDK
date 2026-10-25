@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The ledger is a structural Protocol satisfied by vidbyte.agen
 COMMON MODIFICATION PATTERNS: A new lib-level model call site records through active_usage_ledger() with its UsageKind; a new recording method is added to the Protocol and UsageTracker together.
 KNOWN EDGE CASES: Every BaseAgent.generate_reply run is metered, so a plain top-level agent's get_usage() includes its sub-agent tools, continual-trace agent, auto handoff, and lib-level decision calls, while each nested agent's own get_usage() stays its own; only a DecisionModelRunner called outside any agent run records nothing; asyncio tasks copy the ledger in effect when they were created.
 RELATED DOCS: docs/design/jev-run-usage-ledger.md.
-TESTS: tests/test_jev_usage_ledger.py and tests/features/sdk_model_usage/test_nested_usage_bill.py.
+TESTS: tests/test_jev_usage_ledger.py, tests/features/sdk_model_usage/test_nested_usage_bill.py, and tests/features/sdk_model_usage/test_jev_versioned_answer_pricing.py.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from vidbyte.lib.enums.usage import UsageKind
 class UsageLedger(Protocol):
     """The recording surface a run's usage ledger offers to model call sites below the agent layer."""
 
-    def record_call(self, response: object, *, kind: UsageKind = UsageKind.GENERATIVE) -> object:
-        """Record and price one model response that reports provider, model, and usage."""
+    def record_call(self, response: object, *, kind: UsageKind = UsageKind.GENERATIVE, requested_model: str | None = None) -> object:
+        """Record and price one model response that reports provider, model, and usage; requested_model prices a versioned answer the pricebook lacks."""
         ...
 
     def record_billed_failure(self, provider: ModelProvider, model: str, usage: Mapping[str, Any], *, kind: UsageKind) -> object:
