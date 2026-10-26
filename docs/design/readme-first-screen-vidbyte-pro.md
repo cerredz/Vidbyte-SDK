@@ -55,6 +55,7 @@ agent = Agent(name="researcher", system_prompt="Answer directly.",
 
 - `README.md`: a docs link in the first paragraph, and a new `## At a Glance` section above `## What You Can Build`.
 - `pyproject.toml`: `authors[0].email`, `[project.urls]` Homepage and Documentation.
+- `SECURITY.md` and `CODE_OF_CONDUCT.md`: the reporting contact moves from `hello@vidbyte.ai` (an unregistered domain, so whoever registers it would receive security reports) to `contact@vidbyte.pro`.
 - `docs/design/readme-first-screen-vidbyte-pro.md`: this document.
 
 ## Risks and open questions
