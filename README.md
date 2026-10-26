@@ -10,11 +10,29 @@ Vidbyte is an agent engineering platform for building, evaluating, instrumenting
 and distributing AI workflows. The Vidbyte SDK is the Python package surface for
 that platform: it gives developers composable agents, tools, middleware, context
 management, MCP server integration, prompts, evals, provider adapters, pipelines,
-validated workflows, and tracing primitives.
+validated workflows, and tracing primitives. Documentation:
+[vidbyte.pro/docs/sdks](https://vidbyte.pro/docs/sdks), and for `JevAgent`,
+[vidbyte.pro/docs/jev-agent](https://vidbyte.pro/docs/jev-agent).
 
 This repository is intentionally focused on reusable SDK abstractions. Private
 Vidbyte service logic, proprietary learning systems, hosted scoring, and database
 access remain outside this package.
+
+## At a Glance
+
+- **What it is:** `vidbyte-sdk` is Vidbyte's open-source (MIT) Python SDK for building, evaluating, and debugging AI agents. Install it with `pip install vidbyte-sdk` (Python 3.11+) and import it as `vidbyte`.
+- **JevAgent:** `from vidbyte import JevAgent` pairs your LLM with Jev, TypeSafe's decision model. Your model does the work; Jev makes the quick decisions behind preflight questions, tool selection, specialist routing, and continuation. Jev costs **$0.042 per million input tokens**, its output is free, and Vidbyte adds a 10% markup to each run's Jev total, billed to your prepaid Vidbyte API balance through a Vidbyte API key (no TypeSafe account needed). Your own model is [billed separately](https://github.com/cerredz/Vidbyte-SDK#vidbyte-managed-text-calls). Docs: [vidbyte.pro/docs/jev-agent](https://vidbyte.pro/docs/jev-agent).
+- **US-dollar spend cap:** `AgentLoopSettings(max_spend_usd=...)` stops a run once its measured spend reaches the cap, and also stops it when that spend cannot be measured.
+
+```python
+from vidbyte import Agent, AgentLoopSettings
+
+agent = Agent(name="researcher", system_prompt="Answer directly.",
+              provider="openai", model_name="gpt-5.4-mini",
+              agent_loop_settings=AgentLoopSettings(max_spend_usd=0.50))  # US dollars
+```
+
+`max_spend_usd` covers linear runtimes and priced models only. `Agent`, `CodingAgent`, `InfiniteMemoryAgent`, and `JevAgent` (through `JevAgentSettings(loop=...)`) enforce it. `MCTS_SEARCH`, the three `ACTOR_MODEL` runtimes, `CodexHarnessAgent`, and models the SDK cannot price refuse it when the agent is built, with a `ConfigurationError` (for `CodexHarnessAgent`, the cause of a `CodexAgentError`). The cap applies per reply at SDK list prices, before Vidbyte's markups, and is checked before each model and tool call, so one step can carry spend past it. Full rules: [Spend Cap](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/agents/README.md#spend-cap).
 
 ## What You Can Build
 
