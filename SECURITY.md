@@ -14,7 +14,7 @@ latest published `0.1.x` release.
 
 Do not open a public issue for a suspected vulnerability.
 
-Email [hello@vidbyte.ai](mailto:hello@vidbyte.ai) with the subject
+Email [contact@vidbyte.pro](mailto:contact@vidbyte.pro) with the subject
 `[Vidbyte SDK Security] <short summary>`. Include:
 
 - The affected version, commit, and operating environment.
