@@ -40,7 +40,7 @@ class PricedOperationTool(BaseTool):
     _PAYLOAD_KEY: ClassVar[str] = "operation_payload"
 
     def __init__(self, *, client: WebOperationClient | None = None) -> None:
-        # Binds the executing provider client; without one the tool returns a priced contract stub.
+        # Binds the executing provider client; without one the tool returns an unbilled unconfigured error.
         self._client = client
 
     def mode_used(self, call: object, result: ToolResult) -> str:
@@ -67,6 +67,15 @@ class PricedOperationTool(BaseTool):
         # Builds a deterministic priced-contract result carrying the billing annotation;
         # a real provider client replaces the body while keeping this usage metadata shape.
         return ToolResult.success(self.name, summary, metadata=self._usage_metadata(units=units, mode=mode, attempts=1, reported_cost_usd=reported_cost_usd))
+
+    def _unconfigured_result(self) -> ToolResult:
+        # Builds the error a tool returns when it has no provider client, so no request was sent.
+        # @intent an-unconfigured-tool-is-never-billed
+        # The result declares no operation usage, so the runtime records no
+        # operation and the spend cap and the gateway see no charge. It is an
+        # error, so the model is never told that a search or fetch ran.
+        message = f"{self.name} is not configured: it has no {self.provider} client, so no {self.operation} request was sent."
+        return ToolResult.error(self.name, message, metadata={"error": "unconfigured"})
 
     def _executed_result(self, summary: str, payload: object, *, units: int, mode: str, attempts: int) -> ToolResult:
         # Builds a success result carrying the model-facing summary and the typed payload.

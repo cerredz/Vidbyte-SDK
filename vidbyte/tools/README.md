@@ -105,9 +105,11 @@ cancellation.
 Search and fetch tools subclass `PricedOperationTool`, which carries the
 `(operation, provider)` identity the runtime prices against
 [`operation_pricing`](../lib/registries/operation_pricing.py). Supply a client
-and the tool performs the real provider request; omit it and the tool returns a
-priced contract stub, so a tool can be wired into an agent before credentials
-exist.
+and the tool performs the real provider request. Omit it and the tool can still
+be wired into an agent before credentials exist, but every call returns an
+`unconfigured` error that declares no usage: no request is sent, nothing is
+billed, and the model is not told a search ran. Linkup, OpenAlex, and Semantic
+Scholar have no SDK client yet, so they always return that error.
 
 ```python
 from vidbyte.tools.builtins.operations import BraveClient, BraveSearchTool, RetryPolicy

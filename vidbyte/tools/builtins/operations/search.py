@@ -12,6 +12,9 @@ Architecture:
       Exa also suffixes its billing mode with "+highlights" when the bound client
       requested the contents block, because that bills a second vendor meter.
     - Tavily/Linkup: depth-tiered search selecting a billing mode.
+    - A tool with no provider client (and Linkup, OpenAlex and Semantic
+      Scholar, which have no SDK client yet) returns an unconfigured error
+      that declares no usage, so nothing is billed.
 Relations:
     Subclass PricedOperationTool (this package's base) and are exported through
     vidbyte/tools/builtins/operations/__init__.py.
@@ -70,10 +73,10 @@ class BraveSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected BraveClient, or prices a contract stub without one.
+        # Runs the query through the injected BraveClient, or returns an unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         if self._client is None:
-            return self._contract_result(f"brave search: {query}", units=1)
+            return self._unconfigured_result()
         try:
             payload = await self._client.search(query, count=_int_arg(call, "count", 10))
         except (ProviderRequestError, ProviderResponseError):
@@ -103,10 +106,10 @@ class BrowserbaseSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected BrowserbaseClient, or prices a contract stub without one.
+        # Runs the query through the injected BrowserbaseClient, or returns an unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         if self._client is None:
-            return self._contract_result(f"browserbase search: {query}", units=1)
+            return self._unconfigured_result()
         try:
             payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10))
         except (ProviderRequestError, ProviderResponseError):
@@ -133,12 +136,12 @@ class ExaSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected ExaClient, or prices a contract stub without one.
+        # Runs the query through the injected ExaClient, or returns an unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         search_type = _mode_arg(call, "type", _EXA_SEARCH_TYPES, "auto")
         mode = self._billing_mode(search_type)
         if self._client is None:
-            return self._contract_result(f"exa search: {query}", units=_int_arg(call, "num_results", 10), mode=mode)
+            return self._unconfigured_result()
         try:
             payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10), search_type=search_type)
         except (ProviderRequestError, ProviderResponseError) as exc:
@@ -184,11 +187,11 @@ class TavilySearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected TavilyClient, or prices a contract stub without one.
+        # Runs the query through the injected TavilyClient, or returns an unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         mode = _mode_arg(call, "search_depth", ("basic", "advanced"), "basic")
         if self._client is None:
-            return self._contract_result(f"tavily search: {query}", units=1, mode=mode)
+            return self._unconfigured_result()
         try:
             payload = await self._client.search(query, max_results=_int_arg(call, "max_results", 5), search_depth=mode)
         except (ProviderRequestError, ProviderResponseError):
@@ -214,9 +217,8 @@ class LinkupSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Linkup search per request at the standard/deep tier.
-        mode = _mode_arg(call, "depth", ("standard", "deep"), "standard")
-        return self._contract_result(f"linkup search: {call.arguments.get('query', '')}", units=1, mode=mode)
+        # The SDK has no Linkup client yet, so no search can be sent or billed.
+        return self._unconfigured_result()
 
 
 class ParallelSearchTool(PricedOperationTool):
@@ -238,11 +240,11 @@ class ParallelSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the objective through the injected ParallelClient, or prices a contract stub without one.
+        # Runs the objective through the injected ParallelClient, or returns an unbilled unconfigured error without one.
         objective = str(call.arguments.get("objective", ""))
         mode = _mode_arg(call, "processor", ("turbo", "pro"), "turbo")
         if self._client is None:
-            return self._contract_result(f"parallel search: {objective}", units=_int_arg(call, "max_results", 10), mode=mode)
+            return self._unconfigured_result()
         try:
             payload = await self._client.search(objective, max_results=_int_arg(call, "max_results", 10), processor=mode)
         except (ProviderRequestError, ProviderResponseError):
@@ -268,8 +270,8 @@ class OpenAlexSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one OpenAlex search call at the flat per-request rate.
-        return self._contract_result(f"openalex search: {call.arguments.get('query', '')}", units=1)
+        # The SDK has no OpenAlex client yet, so no search can be sent or billed.
+        return self._unconfigured_result()
 
 
 class SemanticScholarSearchTool(PricedOperationTool):
@@ -290,8 +292,8 @@ class SemanticScholarSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Semantic Scholar search call at the free rate.
-        return self._contract_result(f"semantic_scholar search: {call.arguments.get('query', '')}", units=1)
+        # The SDK has no Semantic Scholar client yet, so no search can be sent.
+        return self._unconfigured_result()
 
 
 __all__ = [

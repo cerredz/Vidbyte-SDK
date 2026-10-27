@@ -62,7 +62,7 @@ runtime._billable_attempts: error and not declares_usage -> 0 -> no record_opera
 ```python
 def _unconfigured_result(self) -> ToolResult
 ```
-It returns `ToolResult.error(self.name, "<tool> is not configured with a <provider> client, so no <operation> request
+It returns `ToolResult.error(self.name, "<tool> is not configured: it has no <provider> client, so no <operation> request
 was sent.", metadata={"error": "unconfigured"})`.
 
 ### 6.2 Search and fetch tools
