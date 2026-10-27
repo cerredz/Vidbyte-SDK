@@ -73,7 +73,8 @@ class BraveSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected BraveClient, or returns an unbilled unconfigured error without one.
+        # Runs the query through the injected BraveClient, or returns an
+        # unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         if self._client is None:
             return self._unconfigured_result()
@@ -106,7 +107,8 @@ class BrowserbaseSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected BrowserbaseClient, or returns an unbilled unconfigured error without one.
+        # Runs the query through the injected BrowserbaseClient, or
+        # returns an unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         if self._client is None:
             return self._unconfigured_result()
@@ -136,7 +138,8 @@ class ExaSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected ExaClient, or returns an unbilled unconfigured error without one.
+        # Runs the query through the injected ExaClient, or returns an
+        # unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         search_type = _mode_arg(call, "type", _EXA_SEARCH_TYPES, "auto")
         mode = self._billing_mode(search_type)
@@ -187,7 +190,8 @@ class TavilySearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the query through the injected TavilyClient, or returns an unbilled unconfigured error without one.
+        # Runs the query through the injected TavilyClient, or returns
+        # an unbilled unconfigured error without one.
         query = str(call.arguments.get("query", ""))
         mode = _mode_arg(call, "search_depth", ("basic", "advanced"), "basic")
         if self._client is None:
@@ -217,7 +221,8 @@ class LinkupSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # The SDK has no Linkup client yet, so no search can be sent or billed.
+        # The SDK has no Linkup client yet, so no search can be sent or
+        # billed.
         return self._unconfigured_result()
 
 
@@ -240,7 +245,8 @@ class ParallelSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Runs the objective through the injected ParallelClient, or returns an unbilled unconfigured error without one.
+        # Runs the objective through the injected ParallelClient, or
+        # returns an unbilled unconfigured error without one.
         objective = str(call.arguments.get("objective", ""))
         mode = _mode_arg(call, "processor", ("turbo", "pro"), "turbo")
         if self._client is None:
@@ -270,7 +276,8 @@ class OpenAlexSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # The SDK has no OpenAlex client yet, so no search can be sent or billed.
+        # The SDK has no OpenAlex client yet, so no search can be sent
+        # or billed.
         return self._unconfigured_result()
 
 
@@ -292,7 +299,8 @@ class SemanticScholarSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # The SDK has no Semantic Scholar client yet, so no search can be sent.
+        # The SDK has no Semantic Scholar client yet, so no search can
+        # be sent.
         return self._unconfigured_result()
 
 

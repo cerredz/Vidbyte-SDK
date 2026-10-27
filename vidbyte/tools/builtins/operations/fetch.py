@@ -113,7 +113,9 @@ class FirecrawlFetchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Scrapes every requested page through the injected FirecrawlClient, or returns an unbilled unconfigured error without one.
+        # Scrapes every requested page through the injected
+        # FirecrawlClient, or returns an unbilled unconfigured error
+        # without one.
         urls = _url_list(call)
         if not urls:
             return self._failed_result("firecrawl fetch requires a url or urls argument.", units=0, mode="scrape", attempts=0, error="missing_url")
@@ -148,7 +150,8 @@ class BrowserbaseFetchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Fetches the page through the injected BrowserbaseClient, or returns an unbilled unconfigured error without one.
+        # Fetches the page through the injected BrowserbaseClient, or
+        # returns an unbilled unconfigured error without one.
         url = str(call.arguments.get("url", ""))
         proxies = call.arguments.get("proxies") is True
         mode = "proxy" if proxies else "default"
@@ -180,7 +183,9 @@ class ParallelExtractTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Extracts every requested page through the injected ParallelClient, or returns an unbilled unconfigured error without one.
+        # Extracts every requested page through the injected
+        # ParallelClient, or returns an unbilled unconfigured error
+        # without one.
         urls = _url_list(call)
         if not urls:
             return self._failed_result("parallel extract requires a urls argument.", units=0, mode="default", attempts=0, error="missing_url")
@@ -211,7 +216,9 @@ class TavilyExtractTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Extracts every requested page through the injected TavilyClient, or returns an unbilled unconfigured error without one.
+        # Extracts every requested page through the injected
+        # TavilyClient, or returns an unbilled unconfigured error
+        # without one.
         urls = _url_list(call)
         depth = call.arguments.get("extract_depth")
         mode = depth if depth in ("basic", "advanced") else "basic"
@@ -244,7 +251,8 @@ class LinkupFetchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # The SDK has no Linkup client yet, so no fetch can be sent or billed.
+        # The SDK has no Linkup client yet, so no fetch can be sent or
+        # billed.
         return self._unconfigured_result()
 
 

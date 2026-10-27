@@ -40,7 +40,8 @@ class PricedOperationTool(BaseTool):
     _PAYLOAD_KEY: ClassVar[str] = "operation_payload"
 
     def __init__(self, *, client: WebOperationClient | None = None) -> None:
-        # Binds the executing provider client; without one the tool returns an unbilled unconfigured error.
+        # Binds the executing provider client; without one the tool
+        # returns an unbilled unconfigured error.
         self._client = client
 
     def mode_used(self, call: object, result: ToolResult) -> str:
@@ -69,11 +70,13 @@ class PricedOperationTool(BaseTool):
         return ToolResult.success(self.name, summary, metadata=self._usage_metadata(units=units, mode=mode, attempts=1, reported_cost_usd=reported_cost_usd))
 
     def _unconfigured_result(self) -> ToolResult:
-        # Builds the error a tool returns when it has no provider client, so no request was sent.
+        # Builds the error a tool returns when it has no provider
+        # client, so no request was sent.
         # @intent an-unconfigured-tool-is-never-billed
-        # The result declares no operation usage, so the runtime records no
-        # operation and the spend cap and the gateway see no charge. It is an
-        # error, so the model is never told that a search or fetch ran.
+        # The result declares no operation usage, so the runtime records
+        # no operation and the spend cap and the gateway see no charge.
+        # It is an error, so the model is never told that a search or
+        # fetch ran.
         message = f"{self.name} is not configured: it has no {self.provider} client, so no {self.operation} request was sent."
         return ToolResult.error(self.name, message, metadata={"error": "unconfigured"})
 
