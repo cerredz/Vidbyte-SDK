@@ -14,6 +14,8 @@ Key Functions:
       with requested_model, a TypeSafe versioned answer the pricebook lacks is
       priced as the requested model (ModelPricingRegistry.resolve_answered).
     - record_billed_failure: Prices and stores the usage a provider billed for a failed call.
+    - record_unaccounted_call: Counts a call that may have been billed but
+      reported no usage (a request that timed out in flight).
     - record_operation: Prices and stores one search/fetch operation only with
       positive integer units and a finite cost.
     - rollup: Folds both ledgers into an immutable UsageRollup, optionally for one UsageKind.
@@ -87,6 +89,11 @@ class UsageTracker:
     def record_billed_failure(self, provider: ModelProvider | str, model: str, usage: Mapping[str, object], *, kind: UsageKind) -> UsageRecord | None:
         # Prices and stores the usage a provider billed for a call that then failed, marked failed=True.
         return self._record(_as_provider(provider), model, usage, kind=kind, failed=True)
+
+    def record_unaccounted_call(self) -> None:
+        # Counts one model call that may have been billed but left no
+        # usage to price, such as a request that timed out in flight.
+        self._unaccounted_calls += 1
 
     def _record(self, provider: ModelProvider | None, model: object, payload: object, *, kind: UsageKind, failed: bool, requested_model: str | None = None) -> UsageRecord | None:
         # Parses and prices one call from the pricebook, then stores it; a call that leaves no record is counted.

@@ -135,6 +135,7 @@ from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, ModelProvider
 from vidbyte.lib.errors import (
     AllModelsFailedError,
     PermissionDeniedError,
+    ProviderRequestError,
     ToolExecutionError,
     ToolRegistryError,
 )
@@ -795,13 +796,9 @@ class AgentRuntime:
                         error_type=type(exc).__name__,
                     )
                 )
-                # @intent billed-failed-call-stays-on-the-bill
-                # A provider can bill a 200 whose reply is unusable; the adapter puts that usage on the error, so it is
-                # recorded here before retry, fallback, or re-raise, the same way the decision runner records TypeSafe's.
-                details = getattr(exc, "details", None)
-                billed = details.get("usage") if isinstance(details, Mapping) else None
-                if isinstance(billed, Mapping):
-                    self.usage_tracker.record_billed_failure(str(getattr(handle.provider, "value", handle.provider)), self._speed_model_name(handle), billed, kind=UsageKind.GENERATIVE)
+                # Put a failed call that may have been billed on the
+                # run's ledger before retry, fallback, or re-raise.
+                self._record_failed_call_usage(handle, exc)
                 decision = await self.middleware.on_model_error(
                     self._middleware_context(MiddlewareHook.ON_MODEL_ERROR, state, error=exc)
                 )
@@ -1384,6 +1381,27 @@ class AgentRuntime:
                 cancelled=cancelled,
             )
         )
+
+    def _record_failed_call_usage(self, handle: RunnerHandle, exc: Exception) -> None:
+        # Records the usage a failed model call billed, or counts the
+        # call as unaccounted when its bill is unknown.
+        # @intent billed-failed-call-stays-on-the-bill
+        # A provider can bill a 200 whose reply is unusable; the adapter
+        # puts that usage on the error, so it is recorded here before
+        # retry, fallback, or re-raise, the same way the decision runner
+        # records TypeSafe's.
+        details = getattr(exc, "details", None)
+        billed = details.get("usage") if isinstance(details, Mapping) else None
+        if isinstance(billed, Mapping):
+            self.usage_tracker.record_billed_failure(str(getattr(handle.provider, "value", handle.provider)), self._speed_model_name(handle), billed, kind=UsageKind.GENERATIVE)
+            return
+        # @intent a-call-lost-in-flight-is-unmeasured-spend
+        # With no HTTP status the request may still have reached the
+        # provider (a timeout or a dropped stream) and been billed with
+        # no usage to show, so it counts as unaccounted and a spend cap
+        # fails closed instead of reading the unknown bill as $0.
+        if isinstance(exc, ProviderRequestError) and exc.status_code is None:
+            self.usage_tracker.record_unaccounted_call()
 
     def _record_operation_usage(self, tool: object, call: ToolCall, result: ToolResult) -> None:
         # Records one priced search/fetch operation per provider attempt a
