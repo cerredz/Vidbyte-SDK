@@ -17,7 +17,8 @@ Architecture:
     - PROVIDER_PRICING: Built-in rate table keyed by provider then model string.
     - PRICING_SOURCE_URL / PRICING_AS_OF: Audit metadata for the live source.
     - ModelPricingRegistry: Resolves (provider, model) to rates with prefix
-      matching limited to release suffixes and supports caller overrides.
+      matching limited to release suffixes and supports caller overrides; a
+      minor-version suffix (claude-opus-5-6) is not a release and is unpriced.
 Key Functions:
     - default: Builds a registry over the built-in PROVIDER_PRICING table.
     - resolve: Returns the ModelPricing for a provider/model, or None.
@@ -334,6 +335,11 @@ class ModelPricingRegistry:
     _EMPTY_TABLE: ClassVar[dict[str, ModelPricing]] = {}
     # Providers whose responses name a versioned model ID, with that ID's documented shape.
     _VERSIONED_ANSWER_IDS: ClassVar[Mapping[ModelProvider, re.Pattern[str]]] = MappingProxyType({ModelProvider.TYPESAFE: JEV_VERSIONED_MODEL_ID})
+    # A remainder opening with a one- or two-digit dash number is a new
+    # minor version (claude-opus-5 + -6), also when a dated snapshot
+    # follows it (-6-20261201). A dated snapshot alone opens with four
+    # or more digits (-20251001, -0915, -2026-03-05) and still prices.
+    _MINOR_VERSION_SUFFIX: ClassVar[re.Pattern[str]] = re.compile(r"(?:\.\d+)*-\d{1,2}(?:-|$)")
 
     def __init__(self, table: Mapping[ModelProvider, Mapping[str, ModelPricing]] | None = None) -> None:
         # Copy the source table so register() never mutates shared class state.
@@ -398,6 +404,14 @@ class ModelPricingRegistry:
         # this table omits rather than guesses, so its cost resolves to None.
         if remainder == "-latest":
             return True
+        # A suffix with no separator extends the key's last token
+        # (claude-opus-5 + 0, glm-4.5 + v), so it names another model.
+        if remainder[:1] not in ("-", "."):
+            return False
+        # A one- or two-digit dash number is a minor version, another
+        # SKU: claude-opus-5-6 is not a release of claude-opus-5.
+        if ModelPricingRegistry._MINOR_VERSION_SUFFIX.match(remainder):
+            return False
         return not (len(remainder) >= 2 and remainder[0] == "-" and remainder[1].isalpha())
 
     def register(self, provider: ModelProvider, model: str, pricing: ModelPricing) -> None:

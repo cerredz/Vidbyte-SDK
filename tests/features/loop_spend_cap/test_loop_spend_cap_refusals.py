@@ -14,6 +14,7 @@ case proves.
 FUNCTION INVENTORY: test_a_capped_non_linear_runtime_is_refused;
 test_a_capped_non_text_model_is_refused_naming_its_runner_type;
 test_a_capped_agent_with_an_unpriced_configured_model_is_refused_naming_each_one;
+test_a_capped_agent_on_an_unlisted_minor_version_is_refused;
 test_a_capped_agent_whose_whole_chain_is_measurable_constructs;
 test_a_capped_slug_model_without_a_provider_is_refused_as_the_runner_reads_it;
 test_a_capped_chain_whose_primary_is_unmeasurable_is_refused_naming_the_primary;
@@ -63,6 +64,7 @@ from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.runners import Runner
 
 IMAGE_MODEL = "gpt-image-2"
+UNLISTED_MINOR_MODEL = "claude-opus-5-6"
 PRICED_FALLBACK = (ModelProvider.DEEPSEEK, "deepseek-v4-flash")
 OPENROUTER_MODEL = "openai/" + UNPRICED_MODEL
 NON_LINEAR = [
@@ -182,6 +184,20 @@ def test_a_capped_agent_with_an_unpriced_configured_model_is_refused_naming_each
         _agent(loop=capped_settings(1.0), model_name=model_name, fallback=fallback)
 
     assert str(caught.value) == _unpriced_message(*named)
+    assert caught.value.details == {"agent": "researcher"}
+
+
+def test_a_capped_agent_on_an_unlisted_minor_version_is_refused() -> None:
+    # EC-5: claude-opus-5-6 extends the priced key claude-opus-5 but
+    # is a different SKU, so the cap cannot measure it.
+    _assert_unpriced_text_model(ModelProvider.ANTHROPIC, UNLISTED_MINOR_MODEL)
+    assert ModelPricingRegistry.default().resolve(ModelProvider.ANTHROPIC, "claude-opus-5") is not None
+    assert _agent(loop=AgentLoopSettings(), provider="anthropic", model_name=UNLISTED_MINOR_MODEL).name == "researcher"
+
+    with pytest.raises(ConfigurationError) as caught:
+        _agent(loop=capped_settings(1.0), provider="anthropic", model_name=UNLISTED_MINOR_MODEL)
+
+    assert str(caught.value) == _unpriced_message(f"anthropic:{UNLISTED_MINOR_MODEL}")
     assert caught.value.details == {"agent": "researcher"}
 
 

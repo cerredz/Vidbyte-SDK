@@ -39,6 +39,9 @@ uses for unknown models. The bug was reproduced offline by `repro_15_prefix_sibl
 ## 4. Requirements
 
 ### Functional Requirements
+0. A remainder that does not start with a separator (`-` or `.`) is not a release: `glm-4.5v` is GLM's vision model,
+   and `claude-opus-50` is not Opus 5. This is the same bug in mid-token form, and the sweep found real ids such as
+   `glm-4.5v` and `glm-4.6v` that it priced as their text siblings.
 1. A remainder that starts with `-` followed by one or two digits and then `-` or the end of the string is not a
    release.
 2. Requirement 1 also applies after leading patch tokens (`.1-6`), so `glm-5.1-6` does not fall through to `glm-5`.
@@ -51,16 +54,17 @@ uses for unknown models. The bug was reproduced offline by `repro_15_prefix_sibl
 
 ## 5. High-Level Design
 
-One precompiled class pattern, `_MINOR_VERSION_SUFFIX`, is checked in `_is_release_suffix` right after the `-latest`
-check. There are no other components.
+`_is_release_suffix` gains two early returns after the `-latest` check. The first rejects a remainder with no
+separator. The second rejects one that matches a precompiled class pattern, `_MINOR_VERSION_SUFFIX`. There are no other components.
 
 ## 6. Detailed Design
 
 ### 6.1 ModelPricingRegistry._is_release_suffix
 **File:** `vidbyte/lib/registries/pricing.py` (Modified)
 1. `-latest` is a release, as before.
-2. A remainder that matches `(?:\.\d+)*-\d{1,2}(?:-|$)` is a minor version, so the function returns False.
-3. Otherwise a lettered dash suffix is a variant, as before.
+2. A remainder with no leading `-` or `.` is not a release.
+3. A remainder that matches `(?:\.\d+)*-\d{1,2}(?:-|$)` is a minor version, so the function returns False.
+4. Otherwise a lettered dash suffix is a variant, as before.
 
 Edge cases: date groups (`-2026-03-05`) start with four digits, so they stay releases. `-001`-style revisions have three
 digits, so they also stay releases.
@@ -87,10 +91,13 @@ N/A: same signatures. `resolve` returns `None` for more ids.
   Haiku and Fable `5-N`, and `mistral-large-4-1`. [Silent Failure]
 - `...test_a_dated_snapshot_of_an_unlisted_minor_version_stays_unpriced` checks `claude-opus-5-6-20261201`, and checks
   that `claude-opus-5-5-6` is not priced as `claude-opus-5`. [Hidden Failure]
+- `...test_a_suffix_without_a_separator_is_another_model` checks `glm-4.5v`, `glm-4.6v`, `claude-opus-50`, `gpt-5.45`
+  and `grok-4.55`. [Silent Failure]
 - `...test_release_markers_still_price_like_their_base_key` is extended with `claude-opus-5-5-20261015`,
   `claude-sonnet-5-5-latest` and `gpt-5.4-2026-03-05`. [Hidden Assumption: two-digit date groups]
-- `...test_custom_table_minor_versions_are_unpriced_but_dated_releases_are_not` covers `m-1-2`, `m-1-2-20260101`,
-  `m-1.2-3` and `m-1-2026-01-01`. [Edge Case]
+- `...test_custom_table_minor_versions_are_unpriced_but_dated_releases_are_not` covers `m-1-2`, `m-1-12`,
+  `m-1-2-20260101`, `m-1.2-3`, `m-10` and `m-1v` (unpriced), and `m-1-2026-01-01`, `m-1-0915`, `m-1-001` and `m-1.2`
+  (priced). [Edge Case]
 
 ### Integration Tests
 - `test_a_capped_agent_on_an_unlisted_minor_version_is_refused`: `BaseAgent(..., max_spend_usd=1.0)` on
