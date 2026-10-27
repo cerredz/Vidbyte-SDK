@@ -1,6 +1,6 @@
 # Design Doc: Keep the request prefix stable so Claude thinking blocks replay
 
-**Status:** Needs a founder decision. No PR is open, and no fix has been chosen.
+**Status:** Draft. Option A is implemented on this branch; the founder decides at review.
 **Author:** Claude
 **Created:** 2026-10-27
 **Last Updated:** 2026-10-27
@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-On Claude Fable 5.1, Opus 5.5, Sonnet 5.5, and Haiku 5.5, every multi-iteration agent run fails on its second model call with HTTP 400. This includes tool loops, sub-agent tools, and InfiniteMemoryAgent. The cause is that the runtime rewrites the top-level `system` prompt on every iteration: the "agent loop settings" block shows live counters (`max_iterations: 1/4`). Anthropic signs each thinking block to its prefix (system, tools, and earlier messages). A changed prefix invalidates every replayed block. Fixing this means choosing where, or whether, the model sees live loop budgets. That is a product decision, so this doc lays out the options and stops.
+On Claude Fable 5.1, Opus 5.5, Sonnet 5.5, and Haiku 5.5, every multi-iteration agent run fails on its second model call with HTTP 400. This includes tool loops, sub-agent tools, and InfiniteMemoryAgent. The cause is that the runtime rewrites the top-level `system` prompt on every iteration: the "agent loop settings" block shows live counters (`max_iterations: 1/4`). Anthropic signs each thinking block to its prefix (system, tools, and earlier messages). A changed prefix invalidates every replayed block. Fixing this means choosing where, or whether, the model sees live loop budgets. That is a product decision. This doc lays out the options, and this branch implements the recommended one (A) for review.
 
 ## 2. Goals & Non-Goals
 
@@ -74,7 +74,8 @@ N/A for A. B changes the persisted message history shape.
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | MODIFY | `vidbyte/agents/runtime.py` | `_render_loop_settings_block` renders limits only |
-| MODIFY | `scripts/test-agent-loop-settings.py` | 3 assertions pin live counters |
+| MODIFY | `scripts/test-agent-loop-settings.py` | 3 assertions pinned live counters; now pin limits only |
+| MODIFY | `tests/test_agent_tool_loop.py` | 1 assertion pinned `max_tool_calls: 2/3`; now pins the limit and one identical system prompt across calls |
 | CREATE | `tests/test_thinking_block_replay_prefix.py` | Regression test (on this branch) |
 
 ## 10. Testing Plan
@@ -84,7 +85,9 @@ N/A for A. B changes the persisted message history shape.
 - `test_sub_agent_tool_run_replays_thinking_with_an_unchanged_prefix`: the live `helper.as_tool()` case. [Hidden Failure] Fails on main: `request 2 messages.1.content.0 ... system changed`.
 - `test_sub_agent_thinking_never_reaches_the_parent`: [Hidden Assumption] Passes. Helper blocks do not leak into the parent.
 
-With the loop block made static (A, simulated by monkeypatch), all three pass. A live check on a key from an account created after 2026-08-31 is left for the founder.
+With option A implemented, all three pass. A live check on a key from an account created after 2026-08-31 is left for the founder.
+
+**What the model still knows.** Nothing else in the runtime tells the model its live usage. The agentic-loop prompt only says "The loop also stops if a configured budget is reached." Under A, the model sees each limit, and it can count its own earlier turns and tool calls in the history it receives, unless a context-window algorithm has trimmed them. Token usage is not visible to it.
 
 ## 11. Dependencies & External Services
 

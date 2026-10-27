@@ -807,7 +807,10 @@ class InternalToolBudgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["stop_reason"], "is_done")
         self.assertEqual(searched, ["a", "b"])
         self.assertEqual(reply.content, "done after 2 searches")
-        self.assertIn("max_tool_calls: 2/3", runner.calls[-1]["kwargs"]["system"])
+        # The model sees the configured limit, and the system prompt is identical on every call (no live count).
+        systems = {call["kwargs"]["system"] for call in runner.calls}
+        self.assertEqual(len(systems), 1)
+        self.assertIn("- max_tool_calls: 3", systems.pop())
 
     async def test_rejected_is_done_attempts_do_not_spend_middleware_tool_call_limit(self) -> None:
         # @intent internal-tools-never-spend-the-tool-budget
