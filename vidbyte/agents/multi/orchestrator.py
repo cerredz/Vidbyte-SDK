@@ -20,9 +20,10 @@ import inspect
 import json
 import re
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol, runtime_checkable
+from typing import Annotated, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.json_schema import WithJsonSchema
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.context.multi_agent import MultiAgentContext
@@ -74,9 +75,10 @@ class _TaskSpecOutput(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     required: bool = True
     acceptance_criteria: list[str] = Field(default_factory=list)
-    payload: Any = None
+    # @intent manager-schema-is-typed-and-closed
+    # Strict schemas reject untyped nodes: the wire payload is text.
+    payload: Annotated[Any, WithJsonSchema({"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Optional input for the worker, as plain text or JSON text."})] = None
     max_attempts: int | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class _PlanOutput(BaseModel):
@@ -101,7 +103,7 @@ class _DecisionOutput(BaseModel):
     task_id: str | None = None
     owner: str | None = None
     instruction: str | None = None
-    payload: Any = None
+    payload: Annotated[Any, WithJsonSchema({"anyOf": [{"type": "string"}, {"type": "null"}], "description": "Optional input for the worker, as plain text or JSON text."})] = None
     next_action: str | None = None
     final_answer: str | None = None
     loop_detected: bool = False
@@ -281,7 +283,7 @@ class MagenticOneOrchestrator:
     @classmethod
     def _to_task(cls, item: _TaskSpecOutput) -> TaskSpec:
         # One task mapper keeps the plan conversion readable and independently auditable.
-        return TaskSpec(task_id=item.task_id, goal=item.goal, owner=item.owner, depends_on=tuple(item.depends_on), required=item.required, acceptance_criteria=tuple(item.acceptance_criteria), payload=item.payload, max_attempts=item.max_attempts, metadata=item.metadata)
+        return TaskSpec(task_id=item.task_id, goal=item.goal, owner=item.owner, depends_on=tuple(item.depends_on), required=item.required, acceptance_criteria=tuple(item.acceptance_criteria), payload=item.payload, max_attempts=item.max_attempts)
 
     @classmethod
     def _to_decision(cls, output: BaseModel, owners: tuple[str, ...]) -> OrchestratorDecision:
