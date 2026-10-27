@@ -92,6 +92,7 @@ N/A. These are private models. `TaskSpec`, `OrchestratorDecision`, and `MultiAge
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | MODIFY | `vidbyte/agents/multi/orchestrator.py` | Type `payload` on the wire, drop open `metadata` |
+| MODIFY | `vidbyte/agents/multi/README.md` | Dated log entry for the schema decision |
 | CREATE | `tests/multi_agent/test_manager_schema_wire.py` | Wire-level regression tests |
 | CREATE | `scripts/test-multiagent-manager-schema-types.py` | Design-doc verification script |
 | CREATE | `docs/design/multiagent-manager-schema-types.md` | This document |
