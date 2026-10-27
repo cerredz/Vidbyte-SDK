@@ -43,25 +43,26 @@ LIVE_US = {**LIVE_FAST, "inference_geo": "us", "speed": "standard"}
 
 
 def _usage(input_tokens: int = 0, output_tokens: int = 0, read: int = 0, write_5m: int = 0, write_1h: int = 0, **modifiers: object) -> dict[str, object]:
-    # Builds an Anthropic usage payload; modifiers adds speed and inference_geo.
+    # Builds an Anthropic usage payload; modifiers adds speed and
+    # inference_geo.
     buckets = {"ephemeral_5m_input_tokens": write_5m, "ephemeral_1h_input_tokens": write_1h}
     return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cache_read_input_tokens": read, "cache_creation_input_tokens": write_5m + write_1h, "cache_creation": buckets, **modifiers}
 
 
 def _price(model: str, payload: dict[str, object]) -> float | None:
-    # Prices one payload against the pricebook UsageTracker uses by default.
+    # Prices one payload against UsageTracker's default pricebook.
     usage = AnthropicUsage.from_usage_payload(payload)
     assert usage is not None
     return usage.cost_usd(ModelPricingRegistry.default().resolve(ANTHROPIC, model))
 
 
 def _assert_documented_price(cost: float | None, truth: str) -> None:
-    # Asserts the SDK's cost equals Anthropic's documented decimal price.
+    # Asserts the SDK's cost equals Anthropic's documented price.
     assert cost is not None, f"unpriced, expected ${truth}"
     assert cost == pytest.approx(float(Decimal(truth)), rel=PRICE_REL_TOLERANCE, abs=0.0)
 
 
-# --- The two live payloads -------------------------------------------------
+# The two live payloads.
 
 
 def test_live_opus_5_5_fast_payload_bills_the_fast_rate() -> None:
@@ -71,12 +72,12 @@ def test_live_opus_5_5_fast_payload_bills_the_fast_rate() -> None:
 
 
 def test_live_opus_5_5_us_payload_bills_1_1x() -> None:
-    # [Silent Failure] (13 x $4 + 6 x $20) x 1.1 per MTok. The SDK billed
-    # $0.000172, without the data-residency multiplier, on 2026-10-27.
+    # [Silent Failure] (13 x $4 + 6 x $20) x 1.1 per MTok. The SDK
+    # billed $0.000172, without the residency multiplier, on 2026-10-27.
     _assert_documented_price(_price("claude-opus-5-5", LIVE_US), "0.0001892")
 
 
-# --- Stacking ----------------------------------------------------------------
+# Stacking.
 
 
 def test_fast_and_us_stack_on_the_same_call() -> None:
@@ -133,11 +134,11 @@ def test_opus_5_fast_cache_uses_its_own_0_1x_read_multiplier() -> None:
 
 
 def test_a_dated_opus_5_5_id_prices_fast_at_the_fast_rate() -> None:
-    # [Edge Case] A dated snapshot resolves to the base row and its tier.
+    # [Edge Case] A dated snapshot resolves to the base row's tier.
     _assert_documented_price(_price("claude-opus-5-5-20261101", LIVE_FAST), "0.000344")
 
 
-# --- Standard rates stay exactly as they were --------------------------------
+# Standard rates stay exactly as they were.
 
 
 def test_not_available_geo_bills_1x_identical_to_no_field() -> None:
@@ -156,7 +157,7 @@ def test_standard_reports_are_bit_identical_to_no_report(modifiers: dict[str, ob
     assert _price("claude-opus-5-5", {**payload, **modifiers}) == _price("claude-opus-5-5", payload)
 
 
-# --- Fail safe: never bill an unpriceable modifier at standard ---------------
+# Fail safe: never bill an unpriceable modifier at standard.
 
 
 @pytest.mark.parametrize("model", ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5-5", "claude-haiku-5-5"])
@@ -174,8 +175,8 @@ def test_an_unknown_speed_is_unpriced(speed: object) -> None:
 
 @pytest.mark.parametrize("geo", ["eu", "US", "", 0, []])
 def test_an_unknown_inference_geo_is_unpriced(geo: object) -> None:
-    # [Hidden Failure] A geography Anthropic adds later may carry its own
-    # multiplier.
+    # [Hidden Failure] A geography Anthropic adds later may carry its
+    # own multiplier.
     assert _price("claude-opus-5-5", _usage(13, 6, speed="standard", inference_geo=geo)) is None
 
 
@@ -189,7 +190,7 @@ def test_a_fast_tier_without_cache_rates_bills_cache_at_the_fast_input_rate() ->
     _assert_documented_price(usage.cost_usd(registry.resolve(ANTHROPIC, "claude-custom")), "0.016")
 
 
-# --- Pricebook pins -----------------------------------------------------------
+# Pricebook pins.
 
 # Fast input, cache read, 5m cache write and output per MTok. Anthropic
 # publishes fast input and output; the cache rates are that model's
@@ -203,7 +204,7 @@ EXPECTED_FAST_RATES = {
 
 @pytest.mark.parametrize(("model", "rates"), EXPECTED_FAST_RATES.items())
 def test_each_fast_capable_opus_row_carries_its_published_fast_rate(model: str, rates: tuple[float, float, float, float]) -> None:
-    # [Silent Failure] The fast tier holds Anthropic's published numbers.
+    # [Silent Failure] The fast tier holds the published numbers.
     fast = (PROVIDER_PRICING[ANTHROPIC][model].tier_rates or {}).get("fast")
     assert fast is not None
     assert (fast["input_per_million"], fast["cached_input_per_million"], fast["cache_write_per_million"], fast["output_per_million"]) == rates
@@ -225,12 +226,12 @@ def test_no_other_anthropic_row_offers_fast_mode() -> None:
     assert {model for model, row in PROVIDER_PRICING[ANTHROPIC].items() if row.tier_rates} == set(EXPECTED_FAST_RATES)
 
 
-# --- Integration ----------------------------------------------------------------
+# Integration.
 
 
 def test_tracker_records_the_live_fast_call_at_the_fast_rate() -> None:
-    # [Silent Failure] The tracker's ledger, not just the parser, carries
-    # the fast price, and the rollup stays complete.
+    # [Silent Failure] The tracker's ledger, not just the parser,
+    # carries the fast price, and the rollup stays complete.
     tracker = UsageTracker()
     record = tracker.record_call(SimpleNamespace(provider="anthropic", model="claude-opus-5-5", usage=LIVE_FAST))
     assert record is not None

@@ -375,8 +375,9 @@ def test_every_provider_default_text_model_is_priced() -> None:
 
 def test_the_pricebook_vintage_names_this_refresh() -> None:
     # [Hidden Failure] Changed rates under an old vintage would let a
-    # backend run resume on new prices. 2026-10-25 added TypeSafe jev-1.14.
-    assert PRICING_AS_OF == "2026-10-25"
+    # backend run resume on new prices. 2026-10-25 added TypeSafe
+    # jev-1.14; 2026-10-27 added Anthropic fast-mode rates on Opus.
+    assert PRICING_AS_OF == "2026-10-27"
 
 
 def test_tracker_records_haiku_5_5_cache_heavy_call_at_the_high_tier() -> None:

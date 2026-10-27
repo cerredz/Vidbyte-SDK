@@ -213,8 +213,9 @@ def _inference_geo_multiplier(self) -> float | None: ...
    `pricing`. That formula covers the threshold tier, cache-read and
    cache-write scaling with the active input rate, and 1-hour writes at 2x
    active input.
-4. Return `token_cost * geo_multiplier`. Multiplying by 1.0 is exact in IEEE
-   754, so every non-US result is bit-identical to the old one.
+4. Return the bucket total `/ 1_000_000 * geo_multiplier`. Multiplying by 1.0
+   is exact in IEEE 754, so every non-US result is bit-identical to the old
+   one.
 
 `_rates_for_speed(pricing)`:
 1. Read `raw.get("speed")`. If it is None, return `pricing`.

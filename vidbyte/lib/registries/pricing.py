@@ -14,6 +14,8 @@ Architecture:
       (where offered) Ultrafast rate metadata with short/long context fields.
     - DEEPSEEK_TIME_OF_DAY_RATES: DeepSeek peak and off-peak rate metadata; the
       table itself carries the peak rate.
+    - ANTHROPIC_FAST_MODE_RATES: Claude Opus 5.5, Opus 5 and Opus 4.8 fast-mode
+      rates; AnthropicUsage prices a call whose usage.speed is "fast" with them.
     - PROVIDER_PRICING: Built-in rate table keyed by provider then model string.
     - PRICING_SOURCE_URL / PRICING_AS_OF: Audit metadata for the live source.
     - ModelPricingRegistry: Resolves (provider, model) to rates with prefix
@@ -62,7 +64,7 @@ class ModelPricing:
     tier_rates: Mapping[str, Mapping[str, float]] | None = None
 
 
-PRICING_AS_OF: str = "2026-10-25"
+PRICING_AS_OF: str = "2026-10-27"
 PRICING_SOURCE_URL: str = "https://developers.openai.com/api/docs/pricing"
 
 # Rates verified against official provider pricing pages. PRICING_AS_OF is the date
@@ -153,6 +155,22 @@ DEEPSEEK_TIME_OF_DAY_RATES: dict[str, dict[str, dict[str, float]]] = {
     },
 }
 
+# Fast mode from
+# https://platform.claude.com/docs/en/about-claude/pricing
+# ("Fast mode pricing", checked 2026-10-27): Opus 5.5 $8 / $40, Opus 5
+# and Opus 4.8 $10 / $50, across the full context window. Anthropic
+# publishes only input and output; "prompt caching multipliers apply on
+# top of fast mode pricing", so the cache fields are each model's own
+# multipliers on fast input: 5-minute write 1.25x, read 0.05x on Opus
+# 5.5 and 0.1x on the others. The 1-hour write is 2x the active input
+# (ANTHROPIC_CACHE_WRITE_1H_INPUT_MULTIPLIER). The tier key is the
+# usage.speed value Anthropic reports.
+ANTHROPIC_FAST_MODE_RATES: dict[str, dict[str, dict[str, float]]] = {
+    "claude-opus-5-5": {"fast": {"input_per_million": 8.0, "cached_input_per_million": 0.4, "cache_write_per_million": 10.0, "output_per_million": 40.0}},
+    "claude-opus-5": {"fast": {"input_per_million": 10.0, "cached_input_per_million": 1.0, "cache_write_per_million": 12.5, "output_per_million": 50.0}},
+    "claude-opus-4-8": {"fast": {"input_per_million": 10.0, "cached_input_per_million": 1.0, "cache_write_per_million": 12.5, "output_per_million": 50.0}},
+}
+
 PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     # OpenAI charges the long-context tier (input x2, output x1.5) for the whole
     # request once prompt input exceeds 272k tokens; sub-272k uses the short rate.
@@ -185,16 +203,17 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         # https://platform.claude.com/docs/en/models/opus-5-5/overview.
         # cache_write is the 5-minute write. Cache hits cost 2.5% of
         # input on Fable 5.1 and Mythos 5.1 (verification-only access)
-        # and 5% on Opus 5.5 and Sonnet 5.5.
+        # and 5% on Opus 5.5 and Sonnet 5.5. Fast mode rates are in
+        # ANTHROPIC_FAST_MODE_RATES.
         "claude-fable-5-1": ModelPricing(input_per_million=10.0, output_per_million=50.0, cache_read_per_million=0.25, cache_write_per_million=12.5),
         "claude-mythos-5-1": ModelPricing(input_per_million=10.0, output_per_million=50.0, cache_read_per_million=0.25, cache_write_per_million=12.5),
-        "claude-opus-5-5": ModelPricing(input_per_million=4.0, output_per_million=20.0, cache_read_per_million=0.2, cache_write_per_million=5.0),
+        "claude-opus-5-5": ModelPricing(input_per_million=4.0, output_per_million=20.0, cache_read_per_million=0.2, cache_write_per_million=5.0, tier_rates=ANTHROPIC_FAST_MODE_RATES["claude-opus-5-5"]),
         "claude-sonnet-5-5": ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.1, cache_write_per_million=2.5),
         # Haiku 5.5 charges 5x for a prompt over 100,000 tokens, and the
         # prompt counts cache reads and writes ("Long context pricing"
         # on the pricing page); AnthropicUsage compares the full prompt.
         "claude-haiku-5-5": ModelPricing(input_per_million=0.1, output_per_million=0.5, cache_read_per_million=0.01, cache_write_per_million=0.125, threshold_tokens=100_000, input_over_threshold_per_million=0.5, output_over_threshold_per_million=2.5),
-        "claude-opus-5": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25),
+        "claude-opus-5": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25, tier_rates=ANTHROPIC_FAST_MODE_RATES["claude-opus-5"]),
         "claude-fable-5": ModelPricing(input_per_million=10.0, output_per_million=50.0, cache_read_per_million=1.0, cache_write_per_million=12.5),
         "claude-mythos-5": ModelPricing(input_per_million=10.0, output_per_million=50.0, cache_read_per_million=1.0, cache_write_per_million=12.5),
         # Sonnet 5's introductory window ended 2026-08-31 and the
@@ -202,7 +221,7 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "claude-sonnet-5": ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.2, cache_write_per_million=2.5),
         "claude-sonnet-4-6": ModelPricing(input_per_million=3.0, output_per_million=15.0, cache_read_per_million=0.3, cache_write_per_million=3.75),
         "claude-sonnet-4-5": ModelPricing(input_per_million=3.0, output_per_million=15.0, cache_read_per_million=0.3, cache_write_per_million=3.75),
-        "claude-opus-4-8": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25),
+        "claude-opus-4-8": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25, tier_rates=ANTHROPIC_FAST_MODE_RATES["claude-opus-4-8"]),
         "claude-opus-4-7": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25),
         "claude-opus-4-6": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25),
         "claude-opus-4-5": ModelPricing(input_per_million=5.0, output_per_million=25.0, cache_read_per_million=0.5, cache_write_per_million=6.25),
@@ -415,6 +434,7 @@ class ModelPricingRegistry:
 __all__ = [
     "ModelPricing",
     "ModelPricingRegistry",
+    "ANTHROPIC_FAST_MODE_RATES",
     "DEEPSEEK_TIME_OF_DAY_RATES",
     "OPENAI_GPT56_TIER_RATES",
     "OPENAI_GPT6_TIER_RATES",
