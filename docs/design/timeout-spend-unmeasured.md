@@ -41,7 +41,11 @@ one call and `cost_measured=True`. It exits 1 on `origin/main` f0896962.
 ### Functional Requirements
 1. `UsageTracker.record_unaccounted_call()` adds one to the unaccounted count and nothing else.
 2. In the runtime's failed-call branch: if the error carries billed usage, call `record_billed_failure` (unchanged).
-   Otherwise, if it is a `ProviderRequestError` whose `status_code` is None, call `record_unaccounted_call()`.
+   Otherwise, if the handle is DIRECT and the error is a `ProviderRequestError` whose `status_code` is None, call
+   `record_unaccounted_call()`. Gateway modes (AUTO, VIDBYTE_MANAGED) are metered by the gateway, and JevAgent settles
+   its usage strictly (`unaccounted_call_count > 0` raises `UsageAccountingError`). Its helpers are designed to fail
+   open on a status-less error (`test_clarification_agent_failure_fails_open` and three siblings), so counting gateway
+   failures would turn a transient helper outage into a hard JevAgent failure. That is a product decision (§13).
 3. Each attempt is counted, so a timed-out retry counts again.
 
 ### Non-Functional Requirements
@@ -109,6 +113,8 @@ timeout then stops as unmeasured instead of continuing. Rollback is a revert.
 ## 13. Open Questions
 - [ ] Should a cancelled in-flight call (agent timeout, task cancel), and a timed-out Jev decision call, also count as
   unaccounted? They are the same gap, and I recommend it as a follow-up.
+- [ ] Should a status-less failure in a gateway mode also count as unmeasured? Doing so makes JevAgent fail closed
+  on any helper timeout (it does not today).
 - [ ] Should the transport tag connect-phase failures (never sent) so that they stay measured at $0?
 
 ## 14. Alternatives Considered

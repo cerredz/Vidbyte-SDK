@@ -131,7 +131,7 @@ from vidbyte.lib.dataclasses.speed import (
     RecordToolCallInput,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, ModelProvider, UsageKind
+from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality, ModelProvider, TextModelMode, UsageKind
 from vidbyte.lib.errors import (
     AllModelsFailedError,
     PermissionDeniedError,
@@ -1396,11 +1396,13 @@ class AgentRuntime:
             self.usage_tracker.record_billed_failure(str(getattr(handle.provider, "value", handle.provider)), self._speed_model_name(handle), billed, kind=UsageKind.GENERATIVE)
             return
         # @intent a-call-lost-in-flight-is-unmeasured-spend
-        # With no HTTP status the request may still have reached the
-        # provider (a timeout or a dropped stream) and been billed with
-        # no usage to show, so it counts as unaccounted and a spend cap
-        # fails closed instead of reading the unknown bill as $0.
-        if isinstance(exc, ProviderRequestError) and exc.status_code is None:
+        # With no HTTP status a DIRECT request may still have reached
+        # the provider (a timeout or a dropped stream) and been billed
+        # to the caller's own key with no usage to show, so it counts
+        # as unaccounted and a spend cap fails closed instead of
+        # reading the unknown bill as $0. Gateway modes are metered by
+        # the gateway.
+        if handle.model_mode is TextModelMode.DIRECT and isinstance(exc, ProviderRequestError) and exc.status_code is None:
             self.usage_tracker.record_unaccounted_call()
 
     def _record_operation_usage(self, tool: object, call: ToolCall, result: ToolResult) -> None:
