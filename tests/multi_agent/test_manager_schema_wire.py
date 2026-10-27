@@ -21,6 +21,13 @@ COMMON MODIFICATION PATTERNS:
     https://platform.claude.com/docs/en/build-with-claude/structured-outputs.
 WHAT NOT TO DO:
     Do not reach the network or read keys from the environment.
+KNOWN EDGE CASES:
+    A prompt-only provider may still return an object payload; it validates
+    as before. Anthropic's union and optional parameter limits are counted
+    across the whole schema, not per object.
+RELATED DOCS:
+    docs/design/multiagent-manager-schema-types.md and
+    vidbyte/agents/multi/README.md.
 TESTS:
     python -m pytest tests/multi_agent/test_manager_schema_wire.py
 """

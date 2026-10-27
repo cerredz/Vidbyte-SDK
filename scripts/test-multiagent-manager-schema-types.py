@@ -1,8 +1,22 @@
 """Verification script for the MultiAgent manager schema fix.
 
-Covers every test case in docs/design/multiagent-manager-schema-types.md Section 10,
-plus the existing multi-agent pack, with a PASS or FAIL line per test.
-Run with: python scripts/test-multiagent-manager-schema-types.py
+PURPOSE:
+    Runs every test case in docs/design/multiagent-manager-schema-types.md
+    Section 10, plus the rest of the multi-agent pack, and prints a PASS or
+    FAIL line per test with an X/Y summary.
+ROLE IN CODEBASE:
+    Design-doc verification entry point; scripts/run_ci.py remains the gate.
+ARCHITECTURE NOTE:
+    Drives pytest in-process with a small reporting plugin, so the cases
+    live only in tests/multi_agent/ and are never duplicated here.
+COMMON MODIFICATION PATTERNS:
+    Add a test to tests/multi_agent/; this script picks it up unchanged.
+KNOWN EDGE CASES:
+    Setup or teardown errors count as a FAIL line for that test.
+RELATED DOCS:
+    docs/design/multiagent-manager-schema-types.md
+TESTS:
+    python scripts/test-multiagent-manager-schema-types.py
 """
 
 from __future__ import annotations
