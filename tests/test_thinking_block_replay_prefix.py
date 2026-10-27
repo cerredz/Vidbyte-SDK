@@ -17,9 +17,17 @@ ARCHITECTURE NOTE:
     that produced every replayed block and compare the two prefixes, exactly as
     https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
     defines the check.
+COMMON MODIFICATION PATTERNS:
+    Add a case per agent shape that loops (tools, sub-agents, middleware that
+    edits history) and assert prefix_changes() stays empty.
 WHAT NOT TO DO:
     Do not relax the comparison to "close enough": the API compares the prefix
     exactly. Do not reach the network or read keys from the environment.
+KNOWN EDGE CASES:
+    Removing thinking blocks from the start or end of history is allowed by
+    the docs; this test only checks blocks that are sent back.
+RELATED DOCS:
+    docs/design/thinking-block-replay-prefix.md
 TESTS:
     python -m pytest tests/test_thinking_block_replay_prefix.py
 """
