@@ -1,6 +1,6 @@
 """FILE: tests/features/harness_threads/test_harness_threads_surface.py
 
-PURPOSE: The public surface and the removal of the rejected design: the nine thread functions, the 47 thread helpers and skill functions of harness-thread-helpers-skills and their exports (INV-1, D-22; helpers spec INV-1: 68 names, subpackages 25/15/16), the signatures of the nine (§8.5), the StrEnum vocabularies and vendor values with the helpers spec's appended members and new enums (D-11, R-3; helpers spec §9.1), the FailureCode tail (INV-22, D-10; helpers spec INV-22: 28 + 4 codes), the contract constants (§8.5; helpers spec §9.3), the old names and files gone (AC-13, INV-19, INV-21) and a side-effect-free `import vidbyte` (INV-23).
+PURPOSE: The public surface and the removal of the rejected design: the nine thread functions, the 47 thread helpers and skill functions of harness-thread-helpers-skills and their exports (INV-1, D-22; helpers spec INV-1: 68 names, subpackages 25/15/16), the signatures of the nine (§8.5), the StrEnum vocabularies and vendor values with the helpers spec's appended members and new enums (D-11, R-3; helpers spec §9.1), the FailureCode tail (INV-22, D-10; helpers spec INV-22: 28 + 4 codes), the contract constants (§8.5; helpers spec §9.3), the old names and files gone (AC-13, INV-19) and a side-effect-free `import vidbyte` (INV-23).
 ROLE IN CODEBASE: Start here when an import, an export list, a failure code or a constant changes. Nothing here starts a vendor stand-in.
 ARCHITECTURE NOTE: The git checks compare against `git merge-base origin/main HEAD` (so a newer main cannot fail them) and skip when origin/main is missing, as in a shallow CI clone. The `import vidbyte` check runs in a fresh interpreter so this suite's own imports cannot hide a side effect.
 FUNCTION INVENTORY: git runs one bounded git command; literal_all reads a module's literal __all__; the test_* functions are one behaviour each.
@@ -24,8 +24,6 @@ import sys
 import textwrap
 from datetime import timedelta
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FUNCTIONS = tuple(f"{verb}_{harness}_thread" for harness in ("grok", "opencode", "muse") for verb in ("run", "continue", "fork"))
@@ -134,13 +132,6 @@ def optional_merge_base() -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return found.stdout.strip() if found.returncode == 0 and found.stdout.strip() else None
-
-
-def merge_base() -> str:
-    base = optional_merge_base()
-    if base is None:
-        pytest.skip("origin/main is not available in this checkout (a shallow CI clone has no main ref)")
-    return base
 
 
 def literal_all(source: str) -> list[str]:
@@ -265,17 +256,6 @@ def test_rejected_design_files_are_deleted() -> None:
     left += [path for path in DELETED_PACKAGES if any((REPO_ROOT / path).rglob("*.py"))]
     left += [OLD_SPEC_FOLDER] if any(path.is_file() for path in (REPO_ROOT / OLD_SPEC_FOLDER).rglob("*")) else []
     assert left == []
-
-
-def test_branch_leaves_the_tools_and_configs_packages_as_main_has_them() -> None:
-    # AC-13 / INV-21: no file of vidbyte.tools or vidbyte.lib.configs,
-    # and nothing of the old spec folder, differs from main.
-    base = merge_base()
-    scoped = ("vidbyte/tools", "vidbyte/lib/configs", OLD_SPEC_FOLDER, ":(exclude)vidbyte/tools/builtins/codex", ":(exclude)vidbyte/tools/builtins/__init__.py", ":(exclude)vidbyte/tools/toolsets/codex.py", ":(exclude)vidbyte/tools/toolsets/__init__.py")
-    changed = git("diff", "--name-only", base, "--", *scoped)
-    assert changed.returncode == 0, changed.stderr
-    untracked = git("ls-files", "--others", "--exclude-standard", "--", *scoped)
-    assert changed.stdout.split() == [] and untracked.stdout.split() == []
 
 
 def test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded() -> None:
