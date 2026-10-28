@@ -15,8 +15,8 @@ Key Functions:
       model's prompt-length tier (Claude Haiku 5.5's 100K tier).
     - cost_usd: Bills cache writes at the 5-minute cache-write rate, except the
       cache_creation.ephemeral_1h_input_tokens part, which bills at 2x the
-      active input rate; prices at the reported speed and multiplies US-only
-      inference by 1.1.
+      active input rate; prices at the reported speed, multiplies US-only
+      inference by 1.1, and adds $0.01 per server-side web search.
     - _rates_for_speed: Swaps in the row's fast tier when usage.speed is
       "fast"; None for an unknown speed or a model with no fast rate.
     - _inference_geo_multiplier: 1.1 for usage.inference_geo "us", 1.0 for
@@ -38,6 +38,7 @@ from vidbyte.agents.pricing.base import ProviderUsage
 from vidbyte.lib.constants.pricing import (
     ANTHROPIC_CACHE_WRITE_1H_INPUT_MULTIPLIER,
     ANTHROPIC_US_INFERENCE_GEO_MULTIPLIER,
+    ANTHROPIC_WEB_SEARCH_USD_PER_REQUEST,
 )
 from vidbyte.lib.enums.usage import AnthropicInferenceGeo, AnthropicSpeed
 from vidbyte.lib.registries.pricing import ModelPricing
@@ -133,16 +134,20 @@ class AnthropicUsage(ProviderUsage):
         # breakdown every write stays at the 5-minute rate, as before.
         cache_writes = self.cache_creation_input_tokens or 0
         one_hour_writes = min(self.nested_int(self.raw, "cache_creation", "ephemeral_1h_input_tokens") or 0, cache_writes)
-        # US-only inference costs 1.1x on every bucket, on top of fast
-        # mode, caching and the prompt-length tier; 1.0 leaves the cost
-        # bit-for-bit unchanged.
+        # Each server-side web search the response reports bills a flat
+        # fee; a null server_tool_use means no server tool ran.
+        web_searches = self.nested_int(self.raw, "server_tool_use", "web_search_requests") or 0
+        # US-only inference costs 1.1x on every token bucket, on top of
+        # fast mode, caching and the prompt-length tier; 1.0 leaves the
+        # cost bit-for-bit unchanged. The search fee is added after it,
+        # because it is not a token price.
         return (
             (self.input_tokens or 0) * input_rate
             + (cache_writes - one_hour_writes) * cache_write_rate
             + one_hour_writes * input_rate * ANTHROPIC_CACHE_WRITE_1H_INPUT_MULTIPLIER
             + (self.cache_read_input_tokens or 0) * cache_read_rate
             + (self.output_tokens or 0) * output_rate
-        ) / 1_000_000 * geo_multiplier
+        ) / 1_000_000 * geo_multiplier + web_searches * ANTHROPIC_WEB_SEARCH_USD_PER_REQUEST
 
     def _rates_for_speed(self, pricing: ModelPricing) -> ModelPricing | None:
         # Returns the rates for the speed usage.speed reports; None when
