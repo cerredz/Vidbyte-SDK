@@ -401,7 +401,8 @@ reply = agent.run("Summarize the open issues in this repository.")
 stopped = reply.metadata["stop_reason"] == AgentStopReason.MAX_SPEND.value
 ```
 
-The loop checks the cap before every model call, every tool call (isDone and the
+The loop checks the cap before every model call (a middleware retry of a failed call
+included), every tool call (isDone and the
 launch tools included), every plain-text finish, and JevAgent's compute checkpoint.
 JevAgent also checks it before a specialist it chose starts, so a run whose gate or
 run-state writer has already reached the cap starts no specialist. It

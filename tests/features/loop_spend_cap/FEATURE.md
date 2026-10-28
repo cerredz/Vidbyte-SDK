@@ -2,7 +2,7 @@
 
 ## High-Level Feature Description
 
-`AgentLoopSettings(max_spend_usd=…)` caps one reply's measured spend. The shared agent loop reads the agent's own priced usage ledger at four check points and stops the run with `stop_reason == "max_spend"` once the measured spend reaches the cap, or once the spend can no longer be fully measured. Every agent that cannot enforce or measure the cap refuses it at construction, before any spend, and a capped stop ends the run: nothing reviews, grades, reflects on, verifies, or retries it, and no queued prompt runs after it.
+`AgentLoopSettings(max_spend_usd=…)` caps one reply's measured spend. The shared agent loop reads the agent's own priced usage ledger at four check points, and again before a middleware retry of a failed model call, and stops the run with `stop_reason == "max_spend"` once the measured spend reaches the cap, or once the spend can no longer be fully measured. Every agent that cannot enforce or measure the cap refuses it at construction, before any spend, and a capped stop ends the run: nothing reviews, grades, reflects on, verifies, or retries it, and no queued prompt runs after it.
 
 ## Contract
 
@@ -83,13 +83,14 @@ The pack was written before the feature existed (spec r3, S2 stage), from the ap
 
 - R-1 (Blocker): a capped JevAgent's delegated path had no spend check, so a specialist started after the gate or the run-state writer had reached the cap (S4's probe ended `final_response` at 2.118 x C). Spec r4 added AC-33; `test_a_reached_cap_starts_no_specialist_the_gate_chose` was red at `daad59fb` until the S5 fix.
 - R-3 (Major): NFR-1 had no test that could fail; a rollup computed before the uncapped return survived the whole suite. `test_an_uncapped_run_computes_no_spend_cap_rollup_or_price` now kills it.
+- 2026-10-28 (phase-2 live billing run): a `ModelRetryMiddleware` retry was sent with no cap check, so after an in-flight timeout made the ledger blind (#1200), or a billed failed attempt reached the cap, a capped run sent one more paid request before CP1 stopped it (live: 2 billed calls, stop `max_spend`). `_invoke_with_middleware` now calls `_spend_cap_stop` before acting on a retry; the two `..._middleware_retry` tests in `test_loop_spend_cap_runtime.py` were red on `2a084078`.
 - R-4 (Major) and R-M5 (Minor): a slug model with no provider, a bad fallback-chain primary, and three refusal-message shapes survived as mutants. The three new refusal tests kill all five.
 
 ## Test Suite Map
 
 - `test_loop_spend_cap_acceptance.py`: AC-1 (the section 4 snippet, run as written, for each of its three lines) and AC-21 (the cap never reaches the wire).
 - `test_loop_spend_cap_contract.py`: AC-2, AC-3, AC-19, T-3, the `AgentStopReason.MAX_SPEND` value, `AgentSpendCap.stop_output` boundaries and cause text, and the export surface (D-16, AC-24's names).
-- `test_loop_spend_cap_runtime.py`: AC-4 to AC-9, AC-22, EC-25, EC-27, INV-8 ties at CP2 and CP3, the capped-below-the-cap equals uncapped metamorphic check, and NFR-1 / INV-17 (no spend-cap rollup or price lookup on an uncapped run).
+- `test_loop_spend_cap_runtime.py`: AC-4 to AC-9, AC-22, EC-25, EC-27, INV-8 ties at CP2 and CP3, the capped-below-the-cap equals uncapped metamorphic check, NFR-1 / INV-17 (no spend-cap rollup or price lookup on an uncapped run), and the check before a middleware retry (a billed failure at the cap, an in-flight timeout on a blind meter).
 - `test_loop_spend_cap_children.py`: AC-15, AC-7 through a sub-agent, and concurrent capped children (EC-14, INV-12).
 - `test_loop_spend_cap_refusals.py`: AC-11, AC-12, AC-27, AC-30, the refusal on a child fork (INV-12), and the INV-13 edges: a slug model with no provider, an unmeasurable fallback-chain primary, and the message shape (distinct pairs, `?` for a missing part, no exemption for a provider-less entry).
 - `test_loop_spend_cap_copy_paths.py`: AC-16, EC-4 through YAML, EC-28, EC-29, EC-30.
