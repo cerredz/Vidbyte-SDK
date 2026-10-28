@@ -30,7 +30,8 @@ from vidbyte.lib.dataclasses.context import BaseAgentContext, StrategyContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import StrategyResult
 from vidbyte.agents.types import AgentMessage
-from vidbyte.lib.enums import ModelModality
+from vidbyte.lib.enums import ModelModality, TextModelMode, UsageKind
+from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.tools.types import ToolCallContext
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.tools.catalog import Tools
@@ -172,7 +173,16 @@ class BaseActorRuntime(ABC):
 
         assert self._handle is not None
         try:
-            raw_result = await self._handle.invoke(prompt, context=actor_context, **call_options)
+            # Send the actor's prompt. A call that fails after it was sent may
+            # already be billed, so it reaches the run's ledger before the error
+            # moves on: with its billed usage when the reply carried some, or
+            # counted as unmeasured spend when it was lost in flight (cancelled
+            # because another actor finished the run, or timed out).
+            try:
+                raw_result = await self._handle.invoke(prompt, context=actor_context, **call_options)
+            except BaseException as exc:
+                self._record_failed_actor_call(exc, target_model)
+                raise
             # @intent actor-calls-are-metered
             # Every actor call is billed, so it lands on the run's usage ledger; the actor task copied that ledger when it was spawned.
             ledger = active_usage_ledger()
@@ -184,6 +194,34 @@ class BaseActorRuntime(ABC):
         except BaseException as exc:
             self._end_semantic_span(span, error=exc)
             raise
+
+    def _record_failed_actor_call(self, exc: BaseException, target_model: str | None) -> None:
+        # Records the usage a failed actor call billed, or counts the call as
+        # unaccounted when its bill is unknown.
+        ledger = active_usage_ledger()
+        if ledger is None or self._handle is None:
+            return
+        # @intent actor-billed-failed-call-stays-on-the-bill
+        # A provider can bill a 200 whose reply is unusable (all thinking, no
+        # text); the adapter puts that usage on the error, so it is recorded,
+        # as the linear runtime records it.
+        details = getattr(exc, "details", None)
+        billed = details.get("usage") if isinstance(details, Mapping) else None
+        if isinstance(billed, Mapping):
+            model = target_model or getattr(getattr(self._handle.runner, "_config", None), "model", None)
+            ledger.record_billed_failure(str(getattr(self._handle.provider, "value", self._handle.provider)), str(model), billed, kind=UsageKind.GENERATIVE)
+            return
+        # @intent actor-call-lost-in-flight-is-unmeasured
+        # When one actor's answer completes the run, every other actor's task
+        # is cancelled, mid-request when it was waiting on the provider; a
+        # timeout has no HTTP status either. A DIRECT request in that state may
+        # have been billed to the caller's own key with no usage to show, so it
+        # counts as unaccounted and the ledger reports its spend as unmeasured
+        # instead of reading the unknown bill as $0. Gateway modes are metered
+        # by the gateway.
+        lost = isinstance(exc, asyncio.CancelledError) or (isinstance(exc, ProviderRequestError) and exc.status_code is None)
+        if lost and self._handle.model_mode is TextModelMode.DIRECT:
+            ledger.record_unaccounted_call()
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: Any = None) -> StrategyResult:
         """Launches prebuilt/dynamic networks and runs asynchronous message-passing loops."""
@@ -257,6 +295,11 @@ class BaseActorRuntime(ABC):
             # Clean up concurrent tasks
             for task in self._tasks:
                 task.cancel()
+            # @intent cancelled-actors-settle-before-the-run-returns
+            # cancel() only requests the stop; wait until every actor has
+            # stopped, so one cancelled mid-request has put that request on the
+            # run's ledger before the agent merges its usage into a parent.
+            await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
             self._actors.clear()
 
