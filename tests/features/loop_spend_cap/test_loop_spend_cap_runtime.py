@@ -3,7 +3,8 @@
 PURPOSE: Prove the four spend-cap check points of the shared agent loop stop a run at
 the right moment: before the next model call (CP1), on a plain-text finish (CP2),
 before every tool call including internal ones (CP3), and before the after-tool
-iteration hook (CP4), for a reached cap and for a blind meter, that a cap the
+iteration hook (CP4), and before a middleware retry of a failed model call, for a
+reached cap and for a blind meter, that a cap the
 run never reaches changes nothing, and that an uncapped run does no spend-cap work.
 ROLE IN CODEBASE: Behavior tests for AgentRuntime._arun_once and its new
 _spend_cap_stop, driven either through BaseAgent.generate_reply (reply level) or
@@ -29,7 +30,9 @@ test_openrouter_spend_is_enforced_from_its_reported_cost;
 test_a_failed_operation_recording_stops_the_run_blind;
 test_spend_after_the_last_tool_check_is_caught_at_the_next_iteration_before_max_iterations;
 test_an_uncapped_run_computes_no_spend_cap_rollup_or_price;
-test_a_billed_failure_that_reaches_the_cap_stops_before_the_backup_model.
+test_a_billed_failure_that_reaches_the_cap_stops_before_the_backup_model;
+test_a_billed_failure_that_reaches_the_cap_stops_before_a_middleware_retry;
+test_an_in_flight_timeout_stops_a_capped_run_before_its_middleware_retry.
 COMMON MODIFICATION PATTERNS: A new check point adds one test that puts the
 crossing spend immediately before it and asserts the stop and what did not run; a
 new budget sharing a check point adds a parametrized tie case.
@@ -63,6 +66,7 @@ from pathlib import Path
 from types import FrameType
 from typing import Any
 
+import httpx
 import pytest
 
 from tests.features.loop_spend_cap.loop_spend_cap_fixtures import (
@@ -754,3 +758,79 @@ def test_a_billed_failure_that_reaches_the_cap_stops_before_the_backup_model(
     ]
     assert rollup.cost_usd == billed.cost_usd == agent.get_usage().cost_usd
     assert rollup.cost_measured is True
+
+
+ANTHROPIC_ANSWER = {"id": "m2", "type": "message", "role": "assistant", "model": "claude-sonnet-5", "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1000, "output_tokens": 5}}
+
+
+class RetryWire:
+    """Stands in for HttpTransport._send_once: the first request fails as scripted, every later one answers; counts requests."""
+
+    def __init__(self, first: object) -> None:
+        self.first = first
+        self.requests = 0
+
+    async def __call__(self, client: object, **_: Any) -> HttpResponse:
+        # A callable instance is not a descriptor, so no transport argument arrives.
+        self.requests += 1
+        if self.requests == 1 and isinstance(self.first, BaseException):
+            raise self.first
+        body = self.first if self.requests == 1 else ANTHROPIC_ANSWER
+        return HttpResponse(status_code=200, body=json.dumps(body), headers={"content-type": "application/json"})
+
+
+def _retry_run(monkeypatch: pytest.MonkeyPatch, first: object, cap: float | None) -> tuple[Any, BaseAgent, RetryWire]:
+    # A direct-mode agent on a priced Anthropic model whose middleware retries one failed model call.
+    from vidbyte.middleware.builtins.retry import ModelRetryMiddleware
+
+    wire = RetryWire(first)
+    monkeypatch.setattr(HttpTransport, "_send_once", wire)
+    agent = BaseAgent(
+        name="researcher",
+        system_prompt="Answer.",
+        provider=ModelProvider.ANTHROPIC.value,
+        model_name="claude-sonnet-5",
+        api_keys=["sk-" + "ant-" + "mock"],
+        model_mode=TextModelMode.DIRECT,
+        middleware=[ModelRetryMiddleware(max_attempts=2)],
+        agent_loop_settings=_loop(cap, max_iterations=3),
+    )
+    return asyncio.run(agent.arun("hi")), agent, wire
+
+
+def test_a_billed_failure_that_reaches_the_cap_stops_before_a_middleware_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A middleware retry is another paid request: once the billed failed attempt alone has reached C, the run stops
+    # before the retry is sent, as CP1 stops before a fallback model (EC-27).
+    control, control_agent, control_wire = _retry_run(monkeypatch, ANTHROPIC_REFUSAL, cap=None)
+    assert control.metadata["stop_reason"] == "final_response"
+    assert control_wire.requests == 2
+    billed = control_agent.get_usage().calls[0]
+    assert (billed.provider, billed.failed) == (ModelProvider.ANTHROPIC.value, True)
+    assert billed.cost_usd is not None and billed.cost_usd > 0
+
+    reply, agent, wire = _retry_run(monkeypatch, ANTHROPIC_REFUSAL, cap=billed.cost_usd)
+
+    assert (reply.content, reply.metadata["stop_reason"]) == (REACHED_TEXT, MAX_SPEND)
+    assert wire.requests == 1
+    rollup = reply.metadata["usage_rollup"]
+    assert [(call.provider, call.failed) for call in rollup.calls] == [(ModelProvider.ANTHROPIC.value, True)]
+    assert rollup.cost_usd == billed.cost_usd == agent.get_usage().cost_usd
+
+
+def test_an_in_flight_timeout_stops_a_capped_run_before_its_middleware_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A status-less timeout may have been billed, so the ledger is blind; a capped run fails closed before the retry
+    # instead of sending one more paid request first. An uncapped run still retries.
+    control, _, control_wire = _retry_run(monkeypatch, httpx.ReadTimeout("timed out"), cap=None)
+    assert control.metadata["stop_reason"] == "final_response"
+    assert control_wire.requests == 2
+
+    reply, agent, wire = _retry_run(monkeypatch, httpx.ReadTimeout("timed out"), cap=1.0)
+
+    assert (reply.content, reply.metadata["stop_reason"]) == (blind_text("1 model calls reported no usage"), MAX_SPEND)
+    assert wire.requests == 1
+    rollup = agent.get_usage()
+    assert (rollup.model_call_count, rollup.unaccounted_call_count, rollup.cost_measured) == (0, 1, False)

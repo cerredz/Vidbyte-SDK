@@ -798,6 +798,14 @@ class AgentRuntime:
                     self._middleware_context(MiddlewareHook.ON_MODEL_ERROR, state, error=exc)
                 )
                 if decision.action is MiddlewareAction.RETRY:
+                    # @intent capped-retry-rechecks-the-cap
+                    # A retry is one more paid request. When the failure just
+                    # recorded left a capped run at its cap, or left its spend
+                    # unmeasured (a request lost in flight), the run stops here,
+                    # as the loop's own check point would, instead of sending it.
+                    spend_stop = self._spend_cap_stop(iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
+                    if spend_stop is not None:
+                        return spend_stop, state.model_call_count, compaction_count
                     if decision.sleep_seconds:
                         await self._sleep_for_model_retry(decision.sleep_seconds, retry_index=retry_ordinal + AGENT_SPEED_FIRST_RETRY_INDEX)
                     # @intent retried-success-times-its-own-attempt
