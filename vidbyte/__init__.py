@@ -39,7 +39,7 @@ Similar files:
 
 from __future__ import annotations
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 import typing as _typing
 
