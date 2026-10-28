@@ -31,6 +31,10 @@ class UsageLedger(Protocol):
         """Record and price the usage a provider billed for a call that then failed."""
         ...
 
+    def record_unaccounted_call(self) -> None:
+        """Count a model call that may have been billed but left no usage to price (lost in flight)."""
+        ...
+
     def mark_recording_corrupted(self) -> None:
         """Flag that a usage record was lost to an internal error."""
         ...
