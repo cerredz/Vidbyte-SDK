@@ -43,6 +43,7 @@ schema = tool_spec_to_provider_schema(lookup_metric.spec(), "openai")
 - `__init__.py`: provider factory and public adapter exports.
 - `base.py`: provider schema translation helpers.
 - `openai.py`, `anthropic.py`, `gemini.py`, `xai.py`, `openrouter.py`, `compatible.py` (DeepSeek, GLM, MiniMax, Kimi, Mistral): provider adapters.
+- `anthropic_thinking.py`: the guard `anthropic.py` runs on every request: it records the prefix each Claude thinking block was signed under and removes blocks whose prefix has since changed, so a mid-run change to `system` or `tools` is not a 400.
 - `tracing/`: provider-backed trace adapters.
 
 ## Related Layers
@@ -528,6 +529,17 @@ Two auth details are vendor-specific and neither is guessable from the code alon
 - **Gemini accepts the key as a header or a URL query parameter.** `gemini.py` uses the
   `x-goog-api-key` header specifically so the key never lands in a URL, where proxy logs, browser
   history, and error reporters would capture it. The intent comment in the file says so; preserve it.
+
+One request-shape detail is also vendor-specific:
+
+- **Claude binds each thinking block to the prefix it was signed under.** On Claude Fable 5.1, Opus 5.5,
+  Sonnet 5.5, and Haiku 5.5, a replayed `thinking` or `redacted_thinking` block is valid only while the
+  top-level `system`, the `tools`, and the messages before it are unchanged (`cache_control` markers and
+  earlier thinking blocks are not part of the check). Otherwise the request is a 400 ("The block is bound
+  to a different conversation"). `anthropic_thinking.py` removes the oldest stale block and every thinking
+  block after it, plus any block an earlier request removed, and never touches the turn's other blocks.
+  This is the minimum removal Anthropic's thinking troubleshooting guide prescribes. Source:
+  [preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking).
 
 ## Google's Colon-Method REST Convention
 

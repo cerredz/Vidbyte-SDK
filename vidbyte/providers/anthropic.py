@@ -15,6 +15,7 @@ from vidbyte.lib.http import HttpResponseParser, HttpTransport, SyncHttpTranspor
 from vidbyte.lib.registries.reasoning_effort import ReasoningEffortRegistry
 from vidbyte.lib.runners.types import TextModelResponse
 from vidbyte.lib.util import PromptPlacement
+from vidbyte.providers.anthropic_thinking import AnthropicThinkingBindings
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
@@ -29,8 +30,13 @@ class AnthropicProvider:
     async def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute an Anthropic Messages API request with optional tools/history.
         config = self._config(config)
-        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/messages", headers=self._create_headers(config), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
+        payload = self._create_payload(config, prompt, system, metadata)
+        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/messages", headers=self._create_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
+        # @intent thinking-blocks-remember-their-prefix
+        # Record the prefix this answer's thinking blocks were signed under,
+        # so a later request can tell when one has gone stale.
+        AnthropicThinkingBindings.record(payload, parsed)
         usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None
         try:
             text = self._extract_text(parsed)
@@ -67,6 +73,13 @@ class AnthropicProvider:
         # overlaps the fragment was refused at construction.
         ReasoningEffortRegistry.attach(payload, provider=config.normalized_provider(), model=config.model, effort=config.reasoning_effort)
         self._attach_extra_body(payload, config)
+        # @intent stale-thinking-is-removed-not-sent
+        # An agent that changed its system prompt, tools, or an earlier
+        # message mid-run would replay thinking signed under the old prefix,
+        # and Claude 5.5-era models refuse that with HTTP 400. Remove the
+        # newest stale block and every thinking block before it, the
+        # removal the docs allow; blocks with an intact prefix stay.
+        AnthropicThinkingBindings.strip_stale(payload)
         return payload
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
