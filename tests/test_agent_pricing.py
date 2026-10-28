@@ -10,7 +10,8 @@ Architecture:
     - PricingBaseTests: nested_int + uncached_input_tokens on ProviderUsage.
     - CompatibleProviderTests: xai/glm/minimax/deepseek route through one class.
     - PricingRegistryStrictnessTests: resolve/register take only ModelProvider.
-    - PricingPrefixFallbackTests: prefix pricing covers releases, not variant SKUs.
+    - PricingPrefixFallbackTests: prefix pricing covers releases, not variant SKUs
+      or unlisted minor versions (claude-opus-5-6 is not priced as Opus 5).
     - AnthropicCacheRateTests: Anthropic cache buckets use the shared rate rules.
     - FreeModelCacheRateTests: a 0.0 base input rate never divides cache rates.
     - OperationPricingTableTests: no operation rate is off by a per-1,000 factor.
@@ -223,10 +224,58 @@ class PricingPrefixFallbackTests(unittest.TestCase):
             (ModelProvider.XAI, "grok-4.5-latest", "grok-4.5"),
             (ModelProvider.TYPESAFE, "jev-1.13.0", "jev-1.13"),
             (ModelProvider.TYPESAFE, "jev-1.14.0", "jev-1.14"),
+            (ModelProvider.ANTHROPIC, "claude-opus-5-5-20261015", "claude-opus-5-5"),
+            (ModelProvider.ANTHROPIC, "claude-sonnet-5-5-latest", "claude-sonnet-5-5"),
+            (ModelProvider.OPENAI, "gpt-5.4-2026-03-05", "gpt-5.4"),
+            (ModelProvider.XAI, "grok-4.7-0915", "grok-4.7"),
         ):
             expected = registry.resolve(provider, base)
             self.assertIsNotNone(expected, base)
             self.assertIs(registry.resolve(provider, release), expected, release)
+
+    def test_an_unlisted_minor_version_does_not_inherit_its_majors_rate(self) -> None:
+        # claude-opus-5-6 starts with claude-opus-5 but is another
+        # SKU; pricing it as Opus 5 would let a spend cap admit it.
+        registry = ModelPricingRegistry.default()
+        for provider, model in (
+            (ModelProvider.ANTHROPIC, "claude-opus-5-6"),
+            (ModelProvider.ANTHROPIC, "claude-opus-5-1"),
+            (ModelProvider.ANTHROPIC, "claude-sonnet-5-6"),
+            (ModelProvider.ANTHROPIC, "claude-haiku-5-6"),
+            (ModelProvider.ANTHROPIC, "claude-fable-5-2"),
+            (ModelProvider.ANTHROPIC, "claude-mythos-5-10"),
+            (ModelProvider.MISTRAL, "mistral-large-4-1"),
+        ):
+            self.assertIsNone(registry.resolve(provider, model), model)
+
+    def test_a_dated_snapshot_of_an_unlisted_minor_version_stays_unpriced(self) -> None:
+        # A response can name the dated snapshot of an unlisted minor,
+        # and a longer priced key must not hand it to an older one.
+        registry = ModelPricingRegistry.default()
+        for model in ("claude-opus-5-6-20261201", "claude-opus-5-5-6", "claude-sonnet-5-5-1-20261201"):
+            self.assertIsNone(registry.resolve(ModelProvider.ANTHROPIC, model), model)
+        self.assertIsNone(registry.resolve(ModelProvider.GLM, "glm-5.1-6"))
+
+    def test_a_suffix_without_a_separator_is_another_model(self) -> None:
+        # glm-4.5v is GLM's vision model and claude-opus-50 is not
+        # Opus 5; a prefix that ends mid-token must not lend its rate.
+        registry = ModelPricingRegistry.default()
+        for provider, model in (
+            (ModelProvider.GLM, "glm-4.5v"),
+            (ModelProvider.GLM, "glm-4.6v"),
+            (ModelProvider.ANTHROPIC, "claude-opus-50"),
+            (ModelProvider.OPENAI, "gpt-5.45"),
+            (ModelProvider.XAI, "grok-4.55"),
+        ):
+            self.assertIsNone(registry.resolve(provider, model), model)
+
+    def test_custom_table_minor_versions_are_unpriced_but_dated_releases_are_not(self) -> None:
+        pricing = ModelPricing(input_per_million=1.0, output_per_million=2.0)
+        registry = ModelPricingRegistry(table={ModelProvider.OPENAI: {"m-1": pricing}})
+        for model in ("m-1-2", "m-1-12", "m-1-2-20260101", "m-1.2-3", "m-10", "m-1v"):
+            self.assertIsNone(registry.resolve(ModelProvider.OPENAI, model), model)
+        for model in ("m-1-2026-01-01", "m-1-0915", "m-1-001", "m-1.2"):
+            self.assertIs(registry.resolve(ModelProvider.OPENAI, model), pricing, model)
 
     def test_priced_variants_keep_their_own_rows(self) -> None:
         registry = ModelPricingRegistry.default()
