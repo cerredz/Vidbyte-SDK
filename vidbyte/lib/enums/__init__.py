@@ -212,7 +212,12 @@ from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 from vidbyte.lib.enums.text_model import ReasoningEffort, TextModelMode
-from vidbyte.lib.enums.usage import UsageAccountingFailure, UsageKind
+from vidbyte.lib.enums.usage import (
+    AnthropicInferenceGeo,
+    AnthropicSpeed,
+    UsageAccountingFailure,
+    UsageKind,
+)
 
 __all__ = [
     "AbsenceEvidenceSignificance",
@@ -220,6 +225,8 @@ __all__ = [
     "AgentRuntimeType",
     "AgentSpeedRecordingIntegrity",
     "AgentType",
+    "AnthropicInferenceGeo",
+    "AnthropicSpeed",
     "AssumptionAction",
     "BasisType",
     "BrowserCapability",
