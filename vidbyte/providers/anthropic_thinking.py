@@ -18,7 +18,7 @@ import logging
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,11 @@ class AnthropicThinkingPrefix:
 class AnthropicThinkingBindings:
     """The prefix each Claude thinking block was signed under, and the removal of blocks whose prefix has since changed."""
 
-    _lock = threading.Lock()
-    _signed: OrderedDict[bytes, bytes] = OrderedDict()
+    # @intent one-record-per-process
+    # Shared on purpose: a fork, a resumed agent, or another runner can
+    # replay a history this process signed through a different provider.
+    _lock: ClassVar[threading.Lock] = threading.Lock()
+    _signed: ClassVar[OrderedDict[bytes, bytes]] = OrderedDict()
 
     @classmethod
     def strip_stale(cls, payload: dict[str, Any]) -> int:
