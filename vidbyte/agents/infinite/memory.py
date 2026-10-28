@@ -6,9 +6,9 @@ ARCHITECTURE NOTE: The root's remember commits at once, while a pair agent's rem
 FUNCTION INVENTORY: InfiniteAgentMemory.tools builds the tools InfiniteMemoryToolRegistry (vidbyte/lib/registries/infinite.py) grants the preset and role; remember, write_note, edit_file, and drop carry out one tool call each and return its message; answer and refusal add the quota line to a message or a problem; quota renders the quota line, which InfinitePair also puts in a pair agent's first message. InfiniteRememberTool, InfiniteWriteNoteTool, InfiniteEditFileTool, and InfiniteDropEntryTool each have spec and execute; InfiniteRememberTool._draft turns the model's arguments into an InfiniteEntryDraft and refuses a multi-line paste with the advice to keep it in a note. remember, write_note, edit_file, and drop each announce their change through InfiniteEvents after it is made, and each tool's execute announces a refusal before it returns the error.
 COMMON MODIFICATION PATTERNS: A new memory tool is one BaseTool subclass here, one method on InfiniteAgentMemory, one builder in tools, its name in the InfiniteMemoryToolRegistry rows that grant it, its name in vidbyte/lib/constants/infinite.py (and INFINITE_RESERVED_TOOL_NAMES), and its description leaves in the prompt family.
 WHAT NOT TO DO IN THIS FILE: 1. Do not write to entries.jsonl from a pair agent; stage instead. 2. Do not count a refused call against the quota. 3. Do not raise out of execute for a rule violation; return ToolResult.error. 4. Do not put module-level constants here; they live in vidbyte/lib/constants/infinite.py.
-KNOWN EDGE CASES: A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times. An event is announced only after its change is on disk or in the staged list, so a refused or failed call announces tool_refused and nothing else; the refusal event carries the same problem text the model is told. A dropped entry is kept as an InfiniteDroppedEntry with the note "dropped by the verifier"; the pair renders it into the card's text.
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-15 to INV-18 and INV-32, and 9.2); docs/spec/infinite-memory-events/spec.md (sections 6.1 and 9.1); vidbyte/agents/infinite/README.md
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, and tests/features/infinite_memory_agent/test_infinite_memory_events_stream.py
+KNOWN EDGE CASES: A staged key is s<staged + dropped + 1>, so keys never repeat within a pair even after drops. A generator and its verifier have separate quotas but share the staged list, so a verifier sees and can drop the generator's entries. write_note records a path once per agent in files_written even when the agent writes it several times. An event is announced only after its change is on disk or in the staged list, so a refused or failed call announces tool_refused and nothing else; the refusal event carries the same problem text the model is told. Every refusal names its rule in its error's details, under INFINITE_REFUSAL_RULE_DETAILS_KEY, and tool_refused is handed the error itself to read it. A dropped entry is kept as an InfiniteDroppedEntry with the note "dropped by the verifier"; the pair renders it into the card's text.
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 6.1 INV-15 to INV-18 and INV-32, and 9.2); docs/spec/infinite-memory-events/spec.md (sections 6.1 and 9.1); docs/spec/infinite-memory-derived-events/spec.md (section 9.1); vidbyte/agents/infinite/README.md
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_workspace.py, tests/features/infinite_memory_agent/test_infinite_memory_verification.py, tests/features/infinite_memory_agent/test_infinite_memory_events_stream.py, and tests/features/infinite_memory_agent/test_infinite_memory_derived_refusals.py
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from vidbyte.lib.constants.infinite import (
     INFINITE_MAX_REFS,
     INFINITE_MAX_TAGS,
     INFINITE_NEW_FILES_PER_AGENT,
+    INFINITE_REFUSAL_RULE_DETAILS_KEY,
     INFINITE_REMEMBER_TOOL_NAME,
     INFINITE_WRITE_NOTE_TOOL_NAME,
 )
@@ -37,6 +38,7 @@ from vidbyte.lib.enums.infinite import (
     InfiniteDropReason,
     InfiniteEntryKind,
     InfiniteFileChange,
+    InfiniteRefusalRule,
 )
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ToolExecutionError
@@ -77,7 +79,7 @@ class InfiniteAgentMemory:
         # Each agent may keep only a few entries, refused calls cost
         # nothing, and a pair's entries wait for the verdict.
         if self.accepted >= self.workspace.settings.max_entries_per_agent:
-            raise ToolExecutionError(f"You have used all {self.workspace.settings.max_entries_per_agent} of your memory entries; keep only what matters most, or write it into a note.")
+            raise ToolExecutionError(f"You have used all {self.workspace.settings.max_entries_per_agent} of your memory entries; keep only what matters most, or write it into a note.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.MAX_ENTRIES_PER_AGENT})
         prompts = Prompts()
         # @intent an-event-follows-its-durable-change
         # Each event below is announced only once the change it reports
@@ -122,7 +124,7 @@ class InfiniteAgentMemory:
         """Drop one staged entry by its key so it is never committed, and return the reply naming the keys left."""
         staged = next((item for item in self.staged if item.key == key), None)
         if staged is None:
-            raise ToolExecutionError(f"{key!r} is not a staged entry; the staged keys are {', '.join(item.key for item in self.staged) or 'none'}.")
+            raise ToolExecutionError(f"{key!r} is not a staged entry; the staged keys are {', '.join(item.key for item in self.staged) or 'none'}.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.UNKNOWN_ENTRY})
         self.staged.remove(staged)
         dropped = InfiniteDroppedEntry(key=staged.key, text=staged.draft.text, reason=InfiniteDropReason.VERIFIER, note="dropped by the verifier")
         self.dropped.append(dropped)
@@ -173,7 +175,7 @@ class InfiniteRememberTool(BaseTool):
         try:
             message = self.memory.remember(self._draft(call.arguments))
         except (ConfigurationError, ToolExecutionError, OSError, ValueError) as exc:
-            self.memory.events.tool_refused(self.memory, INFINITE_REMEMBER_TOOL_NAME, str(exc))
+            self.memory.events.tool_refused(self.memory, INFINITE_REMEMBER_TOOL_NAME, exc)
             return ToolResult.error(INFINITE_REMEMBER_TOOL_NAME, self.memory.refusal(str(exc)))
         return ToolResult.success(INFINITE_REMEMBER_TOOL_NAME, self.memory.answer(message))
 
@@ -184,12 +186,12 @@ class InfiniteRememberTool(BaseTool):
         # tags.
         kind, text, tags, refs = arguments.get("kind"), arguments.get("text", ""), arguments.get("tags"), arguments.get("refs")
         if kind not in [item.value for item in InfiniteEntryKind]:
-            raise ToolExecutionError(f"kind must be one of {', '.join(item.value for item in InfiniteEntryKind)}; got {kind!r}.")
+            raise ToolExecutionError(f"kind must be one of {', '.join(item.value for item in InfiniteEntryKind)}; got {kind!r}.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.INVALID_ARGUMENTS})
         # @intent a-pasted-log-goes-to-a-note
         # An entry is one short line, so a pasted log is refused without
         # being echoed back, with the way to keep it instead.
         if isinstance(text, str) and text.strip() and text.splitlines() != [text]:
-            raise ToolExecutionError("The entry text spans several lines, and an entry is one short line. Save the full text with write_note, then remember a one-line pointer entry that names the note.")
+            raise ToolExecutionError("The entry text spans several lines, and an entry is one short line. Save the full text with write_note, then remember a one-line pointer entry that names the note.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.ENTRY_ONE_LINE})
         return InfiniteEntryDraft(
             kind=InfiniteEntryKind(kind),
             text=text,
@@ -225,10 +227,10 @@ class InfiniteWriteNoteTool(BaseTool):
         path, text, description = call.arguments.get("path"), call.arguments.get("text"), call.arguments.get("description")
         try:
             if not isinstance(path, str) or not isinstance(text, str) or not text:
-                raise ToolExecutionError("path and text must both be text, and text must not be empty.")
+                raise ToolExecutionError("path and text must both be text, and text must not be empty.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.INVALID_ARGUMENTS})
             message = self.memory.write_note(path, text, description if isinstance(description, str) else None)
         except (ConfigurationError, ToolExecutionError, OSError, ValueError) as exc:
-            self.memory.events.tool_refused(self.memory, INFINITE_WRITE_NOTE_TOOL_NAME, str(exc))
+            self.memory.events.tool_refused(self.memory, INFINITE_WRITE_NOTE_TOOL_NAME, exc)
             return ToolResult.error(INFINITE_WRITE_NOTE_TOOL_NAME, self.memory.refusal(str(exc)))
         return ToolResult.success(INFINITE_WRITE_NOTE_TOOL_NAME, self.memory.answer(message))
 
@@ -259,10 +261,10 @@ class InfiniteEditFileTool(BaseTool):
         path, old_text, new_text = call.arguments.get("path"), call.arguments.get("old_text"), call.arguments.get("new_text")
         try:
             if not isinstance(path, str) or not isinstance(old_text, str) or not isinstance(new_text, str):
-                raise ToolExecutionError("path, old_text, and new_text must all be text.")
+                raise ToolExecutionError("path, old_text, and new_text must all be text.", details={INFINITE_REFUSAL_RULE_DETAILS_KEY: InfiniteRefusalRule.INVALID_ARGUMENTS})
             message = self.memory.edit_file(path, old_text, new_text)
         except (ConfigurationError, ToolExecutionError, OSError, ValueError) as exc:
-            self.memory.events.tool_refused(self.memory, INFINITE_EDIT_FILE_TOOL_NAME, str(exc))
+            self.memory.events.tool_refused(self.memory, INFINITE_EDIT_FILE_TOOL_NAME, exc)
             return ToolResult.error(INFINITE_EDIT_FILE_TOOL_NAME, self.memory.refusal(str(exc)))
         return ToolResult.success(INFINITE_EDIT_FILE_TOOL_NAME, self.memory.answer(message))
 
@@ -288,7 +290,7 @@ class InfiniteDropEntryTool(BaseTool):
         try:
             message = self.memory.drop(str(call.arguments.get("id")))
         except ToolExecutionError as exc:
-            self.memory.events.tool_refused(self.memory, INFINITE_DROP_ENTRY_TOOL_NAME, exc.message)
+            self.memory.events.tool_refused(self.memory, INFINITE_DROP_ENTRY_TOOL_NAME, exc)
             return ToolResult.error(INFINITE_DROP_ENTRY_TOOL_NAME, self.memory.refusal(exc.message))
         return ToolResult.success(INFINITE_DROP_ENTRY_TOOL_NAME, self.memory.answer(message))
 

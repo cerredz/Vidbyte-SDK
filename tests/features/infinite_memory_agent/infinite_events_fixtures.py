@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/infinite_events_fixtures.py
 
 PURPOSE: Shared helpers for the InfiniteMemory events and handoff tests (docs/spec/infinite-memory-events/spec.md): readers for a collected event stream, an independent statement of the spec's cut rule, the portability check every collected event must pass, the AC-2 one-pair script, and run views that let two runs be compared once their run id, timestamps, tmp folder, and call ids are replaced by placeholders.
-ROLE IN CODEBASE: Imported by test_infinite_memory_events_stream.py, test_infinite_memory_events_lifecycle.py, test_infinite_memory_events_pairs.py, test_infinite_memory_events_records.py, and test_infinite_memory_handoff.py. It builds on infinite_memory_fixtures.py and leaves that file unchanged.
+ROLE IN CODEBASE: Imported by test_infinite_memory_events_stream.py, test_infinite_memory_events_lifecycle.py, test_infinite_memory_events_pairs.py, test_infinite_memory_events_records.py, test_infinite_memory_handoff.py, and the four test_infinite_memory_derived_*.py modules of docs/spec/infinite-memory-derived-events/spec.md. It builds on infinite_memory_fixtures.py, which docs/spec/infinite-memory-derived-events/spec.md extended with ToolsStep and tool_calls (one model turn that asks for several tool calls) and otherwise left unchanged.
 ARCHITECTURE NOTE: The cut rule here is written from spec INV-12 alone (a lone surrogate becomes "?", a one-line field is collapsed, then a text over its cap keeps its first cap - 8 characters and ends with the literal " … [cut]"). It never calls OutputText, so a wrong cap, marker, or collapse in the implementation shows up as a mismatch instead of agreeing with itself. A sink in these tests is a plain list.append or a small test function; nothing here mocks InfiniteEvents, the records, OutputText, hashlib, or datetime (spec section 13).
-FUNCTION INVENTORY: cut / line state the cap rule for multi-line or exact fields and for collapsed one-line fields; kinds / of_kind / one read a collected stream; assert_portable checks every event's envelope, JSON form, leaf types, and details size (AC-13, INV-11..INV-13, INV-33, INV-35); json_sizes measures one value under the four json.dumps settings; ac2_tree builds the AC-2 script; run_view and calls_view return a run's workspace files and model calls with run-specific values replaced; event_warnings reads the events logger's records from caplog.
+FUNCTION INVENTORY: cut / line state the cap rule for multi-line or exact fields and for collapsed one-line fields; kinds / of_kind / one read a collected stream; assert_portable checks every event's envelope, JSON form, leaf types, and details size (AC-13, INV-11..INV-13, INV-33, INV-35); json_sizes measures one value under the four json.dumps settings; ac2_tree builds the AC-2 script; ac7_tree builds the derived-events AC-7 script (run it under AC7_LIMITS); run_view and calls_view return a run's workspace files and model calls with run-specific values replaced; event_warnings reads the events logger's records from caplog.
 COMMON MODIFICATION PATTERNS: When the spec changes a cap or the marker, change the literal here and nowhere else. A new shared script for several event tests goes here as one builder returning a ScriptedTree.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import from vidbyte.agents.infinite, vidbyte.lib.constants.infinite, vidbyte.lib.enums.infinite, or vidbyte.lib.dataclasses.infinite at module level: before the feature exists that would make every importing module a collection error and abort the session. 2. Do not derive expected caps, markers, or templates from the implementation; take them from the spec. 3. Do not assert inside a sink: InfiniteEvents catches what a sink raises, so record what the sink saw and assert after the run.
 KNOWN EDGE CASES: A journal stamp looks like 2026-10-16T08:15:00+00:00 and an entry stamp the same, so one pattern covers both. The tmp folder appears in prompts in three spellings on Windows (backslashes, forward slashes, and JSON-escaped backslashes), so run views replace all three. The fixture's DEFAULT_USAGE has no total_tokens, so a test about token totals must script total_tokens itself (see the S2 report).
@@ -72,7 +72,10 @@ NOTE_DESCRIPTION = "Acme pricing notes"
 GEN_SUMMARY = "P-SUMMARY: Acme is 49 USD per seat."
 PASSED = "Checked every criterion against its source.\nVERDICT: passed"
 ROOT_ANSWER = "ROOT-FINAL: Acme is cheapest at 49 USD per seat."
-AC2_KINDS = ["run_started", "subagent_launched", "memory_staged", "file_written", "generator_finished", "subagent_finished", "run_finished"]
+# Updated for docs/spec/infinite-memory-derived-events/spec.md AC-2: the verifier's two events, the commit, and the batch's end join the stream.
+AC2_KINDS = ["run_started", "subagent_launched", "memory_staged", "file_written", "generator_finished", "verifier_started", "verifier_finished", "memory_committed", "subagent_finished", "batch_finished", "run_finished"]
+# The AC-7 script of docs/spec/infinite-memory-derived-events/spec.md: the delegation caps it runs under.
+AC7_LIMITS = {"max_parallel": 2, "max_depth": 1}
 
 
 # ---------------------------------------------------------------- the cut rule (spec INV-12)
@@ -172,6 +175,17 @@ def ac2_tree(name: str = PAIR) -> ScriptedTree:
                 reply(GEN_SUMMARY),
             ],
             verifier(name): [reply(PASSED)],
+        }
+    )
+
+
+def ac7_tree() -> ScriptedTree:
+    """The derived-events AC-7 script, run under AC7_LIMITS: the root sends three tasks (over max_parallel), then one task `a` whose generator calls launch_subagent (past max_depth) and replies; a's verifier passes."""
+    return ScriptedTree(
+        {
+            ROOT: [launch(task("x"), task("y"), task("z")), launch(task("a")), reply("done")],
+            generator("a"): [launch(task("b")), reply("A-SUMMARY")],
+            verifier("a"): [reply(PASSED)],
         }
     )
 

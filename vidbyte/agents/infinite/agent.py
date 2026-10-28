@@ -1,14 +1,14 @@
 """FILE: vidbyte/agents/infinite/agent.py
 
-PURPOSE: Exposes InfiniteMemoryAgent, a root agent that ruthlessly delegates work to generator and verifier subagent pairs and keeps its memory in one guarded workspace folder, built from one validated InfiniteMemoryAgentSettings; its resume/aresume, which continue an interrupted run from its journal; and run_handoff, which builds a run's nine-section InfiniteHandoff from its journal and the workspace without a model and saves it beside the journal.
+PURPOSE: Exposes InfiniteMemoryAgent, a root agent that ruthlessly delegates work to generator and verifier subagent pairs and keeps its memory in one guarded workspace folder, built from one validated InfiniteMemoryAgentSettings; its resume/aresume, which continue an interrupted run from its journal; and run_handoff, which builds a run's nine-section InfiniteHandoff from its journal and the workspace without a model, saves it beside the journal, and announces it as handoff_written.
 ROLE IN CODEBASE: Maps the settings into BaseAgent with AgentRuntimeType.INFINITE_MEMORY, which RuntimeRegistry resolves to InfiniteMemoryRuntime (runtime.py). Builds the InfiniteWorkspace (workspace.py) once, and passes it, the settings, and a resumed run's journal (journal.py) to each run-local runtime through _runtime_extension_kwargs.
 ARCHITECTURE NOTE: A closed construction surface like JevAgent: callers pass only the settings object, and the runtime, the preset tools, and the history trim are fixed here. The root holds bash, grep, and read_lines from InfiniteMemoryAgentTools plus the developer's extras; the runtime adds the run-bound tools for each run. Durable sessions are not supported, because a restored agent would be a plain BaseAgent that the runtime refuses; the run journal is the resume path instead.
 FUNCTION INVENTORY: __init__ and run_handoff are the narrated main functions; _runtime_extension_kwargs hands the run-time objects to the runtime; resume and aresume find an unfinished run and continue it; _resume_prompt writes the resumed root's first message; _section makes one handoff body UTF-8 encodable and cuts it to its cap.
 COMMON MODIFICATION PATTERNS: A new agent-level capability is a validated field on InfiniteMemoryAgentSettings (settings.py) used here or passed to the runtime through _runtime_extension_kwargs.
 WHAT NOT TO DO IN THIS FILE: 1. Do not accept BaseAgent keyword arguments; everything comes from the settings. 2. Do not start a run in resume before the journal checks pass. 3. Do not share one middleware instance between agents; each agent builds its own.
-KNOWN EDGE CASES: Building the agent creates the workspace folder and copies the seeds, and refuses a workspace already over a cap. A resumed root starts with a fresh conversation: its first message holds the original task, one short line per finished root-level pair, and the names of interrupted ones. resume() cannot run inside an active event loop; use aresume() there. run_handoff with no run id takes the newest run in any state, so a run still going in another process gets an unfinished handoff of what is on disk now (spec EC-18). A malformed entries.jsonl line or a hand-edited run_finished record raises before the handoff file is written (EC-19, EC-20). A journal written before answers were stored gives the no-answer placeholder and no root files (EC-21); a resumed run lists only the finishing session's root files (EC-22). Two calls for one run each swap in the same whole file (EC-23). A lone surrogate becomes "?" in the handoff only (EC-17), and an Outcome over 239,000 characters or any other section over 15,900 is cut with the marker, while the journal keeps the full answer (EC-24, EC-33).
-RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 4, 6.1 INV-1, INV-2, INV-23, INV-27, INV-28, and 8.5); docs/spec/infinite-memory-events/spec.md (sections 6.1 INV-22 to INV-24 and INV-37, and 9.2); vidbyte/agents/infinite/README.md; vidbyte/agents/jev/agent.py (the pattern this follows)
-TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py, tests/features/infinite_memory_agent/test_infinite_memory_acceptance.py, tests/features/infinite_memory_agent/test_infinite_memory_resume.py, tests/features/infinite_memory_agent/test_infinite_memory_context.py, and tests/features/infinite_memory_agent/test_infinite_memory_handoff.py
+KNOWN EDGE CASES: Building the agent creates the workspace folder and copies the seeds, and refuses a workspace already over a cap. A resumed root starts with a fresh conversation: its first message holds the original task, one short line per finished root-level pair, and the names of interrupted ones. resume() cannot run inside an active event loop; use aresume() there. run_handoff with no run id takes the newest run in any state, so a run still going in another process gets an unfinished handoff of what is on disk now (spec EC-18). A malformed entries.jsonl line or a hand-edited run_finished record raises before the handoff file is written (EC-19, EC-20). A journal written before answers were stored gives the no-answer placeholder and no root files (EC-21); a resumed run lists only the finishing session's root files (EC-22). Two calls for one run each swap in the same whole file (EC-23). A lone surrogate becomes "?" in the handoff only (EC-17), and an Outcome over 239,000 characters or any other section over 15,900 is cut with the marker, while the journal keeps the full answer (EC-24, EC-33). The saved handoff is announced as handoff_written only after its file is written, under the run's id: after the run's terminal event for a finished run, and possibly before one or with none for a run still going or unfinished (derived-events EC-14).
+RELATED DOCS: docs/spec/infinite-memory-agent/spec.md (sections 4, 6.1 INV-1, INV-2, INV-23, INV-27, INV-28, and 8.5); docs/spec/infinite-memory-events/spec.md (sections 6.1 INV-22 to INV-24 and INV-37, and 9.2); docs/spec/infinite-memory-derived-events/spec.md (section 8.5, D-14); vidbyte/agents/infinite/README.md; vidbyte/agents/jev/agent.py (the pattern this follows)
+TESTS: tests/features/infinite_memory_agent/test_infinite_memory_contract.py, tests/features/infinite_memory_agent/test_infinite_memory_acceptance.py, tests/features/infinite_memory_agent/test_infinite_memory_resume.py, tests/features/infinite_memory_agent/test_infinite_memory_context.py, tests/features/infinite_memory_agent/test_infinite_memory_handoff.py, and tests/features/infinite_memory_agent/test_infinite_memory_derived_run.py
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.infinite.events import InfiniteEvents
 from vidbyte.agents.infinite.journal import InfiniteRunJournal
 from vidbyte.agents.infinite.launch import InfinitePair
 from vidbyte.agents.infinite.settings import InfiniteMemoryAgentSettings
@@ -118,7 +119,7 @@ class InfiniteMemoryAgent(BaseAgent):
             self._resuming_var.reset(mark)
 
     def run_handoff(self, run_id: str | None = None) -> InfiniteHandoff:
-        """Build the handoff of the named run, or of the newest run in any state, save it as .runs/<run_id>.handoff.md, and return it; no model is called."""
+        """Build the handoff of the named run, or of the newest run in any state, save it as .runs/<run_id>.handoff.md, announce the saved handoff to the developer's sink, and return it; no model is called."""
         # Load the run in any state, since a stopped run needs a handoff
         # too; its id is checked against the run-id pattern before it
         # becomes a path.
@@ -164,6 +165,10 @@ class InfiniteMemoryAgent(BaseAgent):
         # file and its bytes equal to_context_text().
         target = journal.path.with_name(f"{journal.run_id}{INFINITE_HANDOFF_SUFFIX}")
         workspace.backend.write_text(target, handoff.to_context_text(), encoding="utf-8", create_parents=True, newline="\n", atomic=True)
+
+        # Announce the saved handoff to the developer's sink, if there
+        # is one.
+        InfiniteEvents(self.settings.on_event, journal.run_id).handoff_written(workspace, target, handoff)
         return handoff
 
     @staticmethod

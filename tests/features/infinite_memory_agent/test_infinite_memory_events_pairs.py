@@ -1,9 +1,9 @@
 """FILE: tests/features/infinite_memory_agent/test_infinite_memory_events_pairs.py
 
-PURPOSE: Proves the events that launches, pairs, memory tools, and note writes deliver: batch_rejected for a batch the launch tool refuses, replay before launch in task order, structured drops (verifier, unchecked, rule) whose card text stays byte-identical, file_written for append and edit, one tool_refused per refused memory tool call, caps and omitted counts on long texts and lists, nested keys and depths, a generator that raises, one relative path per note, a lone surrogate, and no event at all for a middleware denial.
+PURPOSE: Proves the events that launches, pairs, memory tools, and note writes deliver: batch_rejected for a batch the launch tool refuses, replay before launch in task order, structured drops (verifier, unchecked, rule) whose card text stays byte-identical, file_written for append and edit, one tool_refused per refused memory tool call, caps and omitted counts on long texts and lists, nested keys and depths, a generator that raises, one relative path per note, a lone surrogate, and one batch_rejected for each middleware denial (derived-events AC-7).
 ROLE IN CODEBASE: Launch-and-memory layer of tests/features/infinite_memory_agent/ for docs/spec/infinite-memory-events/spec.md (AC-7..AC-12, AC-14, AC-22, AC-28, AC-31, AC-34..AC-36; INV-12, INV-15..INV-20, INV-28, INV-34; EC-13, EC-16, EC-17, EC-25, EC-26, EC-34, EC-37; D-8, D-23). Exercises vidbyte/agents/infinite/launch.py, memory.py, and events.py, and InfiniteWorkspace.relative.
 ARCHITECTURE NOTE: Only the model runner is scripted. Expected caps come from cut/line in infinite_events_fixtures.py, which restate spec INV-12 without calling OutputText. The sibling-commit case (AC-10 b) needs pair a to commit before pair b's verifier answers; the sink itself is the hook: it sets a Signal when pair a's subagent_finished arrives, which is after a's commit and card are on disk (INV-4), so the order is forced without polling or sleeps.
-FUNCTION INVENTORY: test_a_batch_the_launch_tool_refuses_delivers_exactly_one_batch_rejected (AC-7, INV-15); test_a_replayed_name_and_a_new_name_are_announced_in_task_order_before_the_new_pair_runs (AC-8, INV-15, EC-26, D-16); test_drop_entry_is_announced_and_listed_in_the_finished_pair_with_the_card_text_unchanged (AC-9, INV-18, INV-28, D-8); test_a_pair_without_a_verdict_reports_every_staged_entry_dropped_as_unchecked (AC-10 a, INV-17, INV-28); test_an_entry_a_sibling_committed_first_is_reported_dropped_with_the_rule_message (AC-10 b, INV-17, INV-28); test_appending_then_editing_a_note_delivers_two_file_written_events (AC-11, INV-19, D-20); test_each_memory_tool_refusal_delivers_one_tool_refused_with_the_reason_the_model_saw (AC-12, INV-20); test_long_texts_and_lists_are_cut_to_their_caps_with_the_marker (AC-14, INV-12, INV-34); test_a_nested_launch_names_its_launcher_and_the_nested_agents_by_key_and_depth (AC-22, INV-11, D-5); test_a_generator_that_raises_has_no_generator_finished_and_its_entries_drop_as_unchecked (AC-28, EC-13, INV-16); test_large_settings_and_long_lists_stay_bounded_with_honest_omitted_counts (AC-31, INV-33, INV-34, EC-25); test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_handoff (AC-34, EC-16, D-23, INV-28); test_a_lone_surrogate_in_a_generator_reply_becomes_a_question_mark_in_events_only (AC-35, EC-17); test_middleware_denials_deliver_no_event_and_the_run_still_finishes (AC-36, EC-37). _remember, _label, _extra_tools, and _summaries are small builders.
+FUNCTION INVENTORY: test_a_batch_the_launch_tool_refuses_delivers_exactly_one_batch_rejected (AC-7, INV-15); test_a_replayed_name_and_a_new_name_are_announced_in_task_order_before_the_new_pair_runs (AC-8, INV-15, EC-26, D-16); test_drop_entry_is_announced_and_listed_in_the_finished_pair_with_the_card_text_unchanged (AC-9, INV-18, INV-28, D-8); test_a_pair_without_a_verdict_reports_every_staged_entry_dropped_as_unchecked (AC-10 a, INV-17, INV-28); test_an_entry_a_sibling_committed_first_is_reported_dropped_with_the_rule_message (AC-10 b, INV-17, INV-28); test_appending_then_editing_a_note_delivers_two_file_written_events (AC-11, INV-19, D-20); test_each_memory_tool_refusal_delivers_one_tool_refused_with_the_reason_the_model_saw (AC-12, INV-20); test_long_texts_and_lists_are_cut_to_their_caps_with_the_marker (AC-14, INV-12, INV-34); test_a_nested_launch_names_its_launcher_and_the_nested_agents_by_key_and_depth (AC-22, INV-11, D-5); test_a_generator_that_raises_has_no_generator_finished_and_its_entries_drop_as_unchecked (AC-28, EC-13, INV-16); test_large_settings_and_long_lists_stay_bounded_with_honest_omitted_counts (AC-31, INV-33, INV-34, EC-25); test_two_spellings_of_one_note_are_one_relative_path_in_events_and_the_handoff (AC-34, EC-16, D-23, INV-28); test_a_lone_surrogate_in_a_generator_reply_becomes_a_question_mark_in_events_only (AC-35, EC-17); test_middleware_denials_deliver_one_batch_rejected_each_and_the_run_still_finishes (AC-36, derived-events AC-7). _remember, _label, _extra_tools, and _summaries are small builders.
 COMMON MODIFICATION PATTERNS: A new event emitted by a pair or a memory tool gets one test here that scripts the call, asserts the exact kinds list, and checks the details against the journaled card or the tool result the model saw.
 WHAT NOT TO DO IN THIS FILE: 1. Do not import feature symbols at module level. 2. Do not assert inside a sink; the AC-10 b sink only sets a Signal and records. 3. Do not compare the card's dropped strings with text built from the events alone; compare them with the literal INV-28 shapes or with a run that has no sink.
 KNOWN EDGE CASES: A middleware denial reaches the model wrapped in the runtime's tool-error envelope, so AC-36 looks for "Tool denied by middleware:" inside the tool result, as the pack's delegation tests do. Context items that are paths are not checked for existence by the launch tool, so AC-14's 30 context paths need no files. The scripted extras in AC-31 come in through settings.tools, whose order the root's catalog keeps, but the test only relies on which names appear.
@@ -129,11 +129,17 @@ def test_a_replayed_name_and_a_new_name_are_announced_in_task_order_before_the_n
         "run_started",
         "subagent_launched",
         "generator_finished",
+        "verifier_started",
+        "verifier_finished",
         "subagent_finished",
+        "batch_finished",
         "subagent_replayed",
         "subagent_launched",
         "generator_finished",
+        "verifier_started",
+        "verifier_finished",
         "subagent_finished",
+        "batch_finished",
         "run_finished",
     ]
     replayed = one(seen, "subagent_replayed")
@@ -175,7 +181,7 @@ def test_drop_entry_is_announced_and_listed_in_the_finished_pair_with_the_card_t
         with tree.install():
             agent.run(TASK)
         tree.assert_complete()
-    assert kinds(seen) == ["run_started", "subagent_launched", "memory_staged", "memory_staged", "generator_finished", "memory_dropped", "subagent_finished", "run_finished"]
+    assert kinds(seen) == ["run_started", "subagent_launched", "memory_staged", "memory_staged", "generator_finished", "verifier_started", "memory_dropped", "verifier_finished", "memory_committed", "subagent_finished", "batch_finished", "run_finished"]
     dropped = one(seen, "memory_dropped")
     assert (dropped.agent_key, dropped.role, dropped.depth) == (f"{pair_key(PAIR)}/ver", InfiniteAgentRole.VERIFIER, 1)
     item = InfiniteDroppedEntry(key="s1", text=wrong, reason=InfiniteDropReason.VERIFIER, note=VERIFIER_NOTE)
@@ -325,7 +331,7 @@ def test_each_memory_tool_refusal_delivers_one_tool_refused_with_the_reason_the_
     with tree.install():
         agent.run(TASK)
     tree.assert_complete()
-    assert kinds(seen) == ["run_started", "memory_saved", "tool_refused", "tool_refused", "tool_refused", "subagent_launched", "generator_finished", "tool_refused", "subagent_finished", "run_finished"]
+    assert kinds(seen) == ["run_started", "memory_saved", "tool_refused", "tool_refused", "tool_refused", "subagent_launched", "generator_finished", "verifier_started", "tool_refused", "verifier_finished", "subagent_finished", "batch_finished", "run_finished"]
     root_calls = tree.calls_by(ROOT)
     seen_by_model = [
         tool_result(root_calls[2], "remember"),
@@ -476,7 +482,7 @@ def test_a_generator_that_raises_has_no_generator_finished_and_its_entries_drop_
     with tree.install():
         agent.run(TASK)
     tree.assert_complete()
-    assert kinds(seen) == ["run_started", "subagent_launched", "memory_staged", "subagent_finished", "run_finished"]
+    assert kinds(seen) == ["run_started", "subagent_launched", "memory_staged", "memory_dropped", "subagent_finished", "batch_finished", "run_finished"]
     card = finished_cards(workspace_root(tmp_path))[pair_key(PAIR)]
     assert "provider is down" in card["review"] and len(card["review"]) > TEXT_MAX
     finished = one(seen, "subagent_finished").details
@@ -539,8 +545,8 @@ def test_a_lone_surrogate_in_a_generator_reply_becomes_a_question_mark_in_events
     assert finished_cards(root)[pair_key(PAIR)]["summary"] == surrogate
 
 
-def test_middleware_denials_deliver_no_event_and_the_run_still_finishes(tmp_path: Path) -> None:
-    """AC-36, EC-37, INV-15: a root batch over max_parallel=2 and a generator's launch past max_depth=1 are denied by DelegationLimitsMiddleware with results naming the limit; neither call gives any event or pair_started, and the run ends with run_finished."""
+def test_middleware_denials_deliver_one_batch_rejected_each_and_the_run_still_finishes(tmp_path: Path) -> None:
+    """AC-36, INV-15 (as reversed by docs/spec/infinite-memory-derived-events/spec.md AC-7, FR-15): a root batch over max_parallel=2 and a generator's launch past max_depth=1 are denied by DelegationLimitsMiddleware with results naming the limit; each now gives one batch_rejected and neither gives a pair_started, and the run ends with run_finished."""
     seen: list[Any] = []
     agent = build_agent(tmp_path, max_parallel=2, max_depth=1, on_event=seen.append)
     tree = ScriptedTree(
@@ -557,7 +563,7 @@ def test_middleware_denials_deliver_no_event_and_the_run_still_finishes(tmp_path
     over_depth = tool_result(tree.calls_by(generator("a"))[1], "launch_subagent")
     assert "Tool denied by middleware:" in over_parallel and "max_parallel" in over_parallel, over_parallel
     assert "Tool denied by middleware:" in over_depth and "max_depth" in over_depth, over_depth
-    assert kinds(seen) == ["run_started", "subagent_launched", "generator_finished", "subagent_finished", "run_finished"]
+    assert kinds(seen) == ["run_started", "batch_rejected", "subagent_launched", "batch_rejected", "generator_finished", "verifier_started", "verifier_finished", "subagent_finished", "batch_finished", "run_finished"]
     assert one(seen, "subagent_launched").details.key == pair_key("a")
     records = journal_records(workspace_root(tmp_path))
     assert events(records) == ["run_started", "pair_started", "pair_finished", "run_finished"]
