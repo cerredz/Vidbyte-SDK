@@ -13,6 +13,8 @@ Architecture:
     - PricingPrefixFallbackTests: prefix pricing covers releases, not variant SKUs
       or unlisted minor versions (claude-opus-5-6 is not priced as Opus 5).
     - AnthropicCacheRateTests: Anthropic cache buckets use the shared rate rules.
+    - OpenAICacheWriteTests: OpenAI and Codex cache writes bill at the cache-write
+      rate, matching the gateway surcharge they replace.
     - FreeModelCacheRateTests: a 0.0 base input rate never divides cache rates.
     - OperationPricingTableTests: no operation rate is off by a per-1,000 factor.
 Relations:
@@ -330,6 +332,89 @@ class AnthropicCacheRateTests(unittest.TestCase):
         pricing = ModelPricing(input_per_million=3.0, output_per_million=15.0, cache_read_per_million=0.3, cache_write_per_million=0.0)
         anthropic = self._cost(pricing, ModelProvider.ANTHROPIC, {"input_tokens": 200, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 800})
         self.assertAlmostEqual(anthropic, 0.0006)
+
+
+class OpenAICacheWriteTests(unittest.TestCase):
+    # @intent openai-cache-writes-bill-at-the-cache-write-rate
+    # OpenAI reports cache writes inside input_tokens; those writes bill
+    # at the cache-write rate, exactly as the gateway's surcharge did.
+
+    ACME = ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.2, cache_write_per_million=2.5)
+
+    @staticmethod
+    def _cost(pricing: ModelPricing, usage: dict[str, object]) -> float | None:
+        registry = ModelPricingRegistry(table={})
+        registry.register(ModelProvider.OPENAI, "acme-model", pricing)
+        tracker = UsageTracker(pricing=registry)
+        tracker.record_call(SimpleNamespace(provider="openai", model="acme-model", usage=usage))
+        return tracker.rollup().cost_usd
+
+    @staticmethod
+    def _usage(input_tokens: int, *, cached: int = 0, writes: int | None = None, output: int = 100) -> dict[str, object]:
+        details: dict[str, object] = {"cached_tokens": cached}
+        if writes is not None:
+            details["cache_write_tokens"] = writes
+        return {"input_tokens": input_tokens, "output_tokens": output, "input_tokens_details": details}
+
+    def test_cache_writes_bill_at_the_cache_write_rate(self) -> None:
+        # [Silent Failure] 6k input at $2, 4k writes at $2.50, 100
+        # output at $10: 0.023, not 0.021.
+        cost = self._cost(self.ACME, self._usage(10_000, writes=4_000))
+        self.assertAlmostEqual(cost, (6_000 * 2.0 + 4_000 * 2.5 + 100 * 10.0) / 1_000_000, places=12)
+
+    def test_the_gpt_6_sol_row_charges_the_write_premium(self) -> None:
+        # [Silent Failure] Through the built-in row: the writes add
+        # exactly their premium over input.
+        row = PROVIDER_PRICING[ModelProvider.OPENAI]["gpt-6-sol"]
+        tracker = UsageTracker()
+        with_writes = tracker.record_call(SimpleNamespace(provider="openai", model="gpt-6-sol", usage=self._usage(10_000, writes=4_000)))
+        without = tracker.record_call(SimpleNamespace(provider="openai", model="gpt-6-sol", usage=self._usage(10_000)))
+        assert with_writes is not None and without is not None and row.cache_write_per_million is not None
+        self.assertAlmostEqual(with_writes.cost_usd - without.cost_usd, 4_000 * (row.cache_write_per_million - row.input_per_million) / 1_000_000, places=12)
+
+    def test_codex_top_level_cache_writes_are_priced_the_same(self) -> None:
+        # [Hidden Assumption] Codex's translator keeps the count top-
+        # level as cache_write_input_tokens.
+        nested = self._cost(self.ACME, self._usage(10_000, writes=4_000))
+        codex = self._cost(self.ACME, {"input_tokens": 10_000, "output_tokens": 100, "input_tokens_details": {"cached_tokens": 0}, "cache_write_input_tokens": 4_000})
+        self.assertAlmostEqual(codex, (6_000 * 2.0 + 4_000 * 2.5 + 100 * 10.0) / 1_000_000, places=12)
+        self.assertAlmostEqual(codex, nested, places=12)
+
+    def test_writes_never_exceed_the_uncached_input(self) -> None:
+        # [Edge Case] 800 of 1,000 input tokens were cache reads, so at
+        # most 200 can be writes.
+        cost = self._cost(self.ACME, self._usage(1_000, cached=800, writes=500, output=0))
+        self.assertAlmostEqual(cost, (200 * 2.5 + 800 * 0.2) / 1_000_000, places=12)
+
+    def test_no_write_rate_or_no_writes_leaves_the_cost_unchanged(self) -> None:
+        # [Edge Case] Without a cache-write rate, or with zero writes,
+        # writes price as plain input.
+        no_rate = ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.2)
+        plain = (10_000 * 2.0 + 100 * 10.0) / 1_000_000
+        self.assertAlmostEqual(self._cost(no_rate, self._usage(10_000, writes=4_000)), plain, places=12)
+        self.assertAlmostEqual(self._cost(self.ACME, self._usage(10_000, writes=0)), plain, places=12)
+
+    def test_the_write_rate_scales_with_the_long_context_tier(self) -> None:
+        # [Hidden Failure] Over the threshold, input doubles to $4, so
+        # the write rate doubles to $5.
+        tiered = ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.2, cache_write_per_million=2.5, threshold_tokens=100_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=20.0)
+        cost = self._cost(tiered, self._usage(150_000, writes=50_000, output=0))
+        self.assertAlmostEqual(cost, (100_000 * 4.0 + 50_000 * 5.0) / 1_000_000, places=12)
+
+    def test_the_added_cost_equals_the_gateway_surcharge_it_replaces(self) -> None:
+        # [Silent Failure] Removing the backend surcharge must leave
+        # gateway bills unchanged: the gateway's own formula, re-derived
+        # here, equals what the SDK now adds.
+        from decimal import Decimal
+
+        tiered = ModelPricing(input_per_million=2.0, output_per_million=10.0, cache_read_per_million=0.2, cache_write_per_million=2.5, threshold_tokens=100_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=20.0)
+        for total, cached, writes in ((10_000, 0, 4_000), (150_000, 30_000, 60_000), (1_000, 800, 500)):
+            with self.subTest(total=total, cached=cached, writes=writes):
+                tier_input = Decimal("4.0") if total > 100_000 else Decimal("2.0")
+                gap = (Decimal("2.5") - Decimal("2.0")) * tier_input / Decimal("2.0")
+                surcharge = min(writes, max(0, total - cached)) * gap / Decimal(1_000_000)
+                added = self._cost(tiered, self._usage(total, cached=cached, writes=writes)) - self._cost(tiered, self._usage(total, cached=cached))
+                self.assertAlmostEqual(added, float(surcharge), places=12)
 
 
 class FreeModelCacheRateTests(unittest.TestCase):
