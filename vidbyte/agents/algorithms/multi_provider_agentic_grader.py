@@ -70,11 +70,13 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
             return aborted
         candidates, total_tokens, call_contexts = self._collect_candidates(active_models, results)
         candidates_text = self._build_candidates_text(candidates)
-        raw_result = await self._run_grader(message, candidates_text, context, handle, metadata, started_at, trace_context)
+        # Grade on the configured model, else on the agent's own model.
+        grader_provider, grader_model = self._grader_identity(handle)
+        raw_result = await self._run_grader(message, candidates_text, context, handle, metadata, started_at, trace_context, grader_provider, grader_model)
         if isinstance(raw_result, AgentResult):
             return raw_result
         selected_output, selected_provider = self._select_winner(candidates, raw_result, handle)
-        res_metadata = self._build_result_metadata(metadata, active_models, selected_provider, candidates, total_tokens, call_contexts)
+        res_metadata = self._build_result_metadata(metadata, active_models, selected_provider, candidates, total_tokens, call_contexts, grader_model)
         # @intent grader-keeps-the-winners-structured-output
         # Carry the winning trial's validated schema instance; the grader's own text has none.
         winner = dict(zip(active_models, results, strict=True)).get(selected_provider)
@@ -146,11 +148,18 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         # Formats all candidate outputs into a labeled block for the grader prompt.
         return "".join(f"### Model Provider: {p_name}\nCandidate Output:\n{text}\n\n" for p_name, text in candidates.items())
 
-    async def _run_grader(self, message: str, candidates_text: str, context: BaseAgentContext, handle: RunnerHandle, metadata: Mapping[str, Any] | None, started_at: Any, trace_context: SpanContext | None) -> Any:
+    def _grader_identity(self, handle: RunnerHandle) -> tuple[str, str]:
+        # Returns the grader's provider and model: the configured pair,
+        # else the agent's own.
+        if self.algorithm.grader_provider is not None and self.algorithm.grader_model is not None:
+            return self.algorithm.grader_provider, self.algorithm.grader_model
+        return str(getattr(handle.provider, "value", handle.provider)), self.runtime._speed_model_name(handle)
+
+    async def _run_grader(self, message: str, candidates_text: str, context: BaseAgentContext, handle: RunnerHandle, metadata: Mapping[str, Any] | None, started_at: Any, trace_context: SpanContext | None, grader_provider: str, grader_model: str) -> Any:
         # Invokes the meta-grader model call via middleware and returns its raw result.
         grader_prompt = self.algorithm.render_grader_prompt(message, candidates_text)
-        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=self.algorithm.grader_provider, model=self.algorithm.grader_model, api_keys=handle.api_keys, mode=handle.model_mode)
-        grader_handle = handle.with_runner(grader_runner, self.algorithm.grader_provider)
+        grader_runner = ModalityDetector.create_runner(modality=ModelModality.TEXT, provider=grader_provider, model=grader_model, api_keys=handle.api_keys, mode=handle.model_mode)
+        grader_handle = handle.with_runner(grader_runner, grader_provider)
         raw_result, _, _ = await self.runtime._invoke_with_middleware(
             grader_handle,
             grader_prompt,
@@ -188,14 +197,14 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         # No candidate matches, so the grader's own text is returned as the answer.
         return grader_output, "grader_raw"
 
-    def _build_result_metadata(self, metadata: Mapping[str, Any] | None, active_models: dict[str, str], selected_provider: str, candidates: dict[str, str], total_tokens: int, call_contexts: list[Any]) -> dict[str, Any]:
+    def _build_result_metadata(self, metadata: Mapping[str, Any] | None, active_models: dict[str, str], selected_provider: str, candidates: dict[str, str], total_tokens: int, call_contexts: list[Any], grader_model: str) -> dict[str, Any]:
         # Assembles the final result metadata dict including grader decision and algorithm trace.
         return {
             **dict(metadata or {}),
             "multi_provider_agentic_grader": {
                 "grader_decision": {
                     "selected_provider": selected_provider,
-                    "model": active_models.get(selected_provider, self.algorithm.grader_model),
+                    "model": active_models.get(selected_provider, grader_model),
                 },
                 "candidates": candidates,
                 "total_runs": len(candidates),

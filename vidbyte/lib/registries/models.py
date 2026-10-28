@@ -276,6 +276,13 @@ class ProviderModelRegistry:
         opts = options or {}
         if provider_models is not None:
             return cls._resolve_explicit(provider_models, opts, api_keys, model_mode)
+        # @intent fan-out-follows-the-agents-own-keys
+        # An agent given provider keys spends only on the providers
+        # those keys name; other keys exported in the environment
+        # belong to the developer, so they never add a paid trial the
+        # agent was not given.
+        if api_keys is not None and api_keys.providers:
+            return cls._resolve_from_keys(api_keys)
         return cls._resolve_from_environment()
 
     @classmethod
@@ -412,6 +419,15 @@ class ProviderModelRegistry:
                     f"Missing API key for explicitly requested provider '{provider_name}'. Set {env_var}."
                 )
             active[provider_name] = model_name
+        return active
+
+    @classmethod
+    def _resolve_from_keys(cls, api_keys: ProviderKeys) -> dict[str, str]:
+        # Builds the active-models dict from the providers the agent's
+        # matched api_keys hold a key for.
+        active = {provider_enum.value: model_name for provider_enum, model_name in cls.DEFAULT_PROVIDER_MODELS.items() if provider_enum in api_keys.providers and ModalityDetector.detect_modality(model_name) is ModelModality.TEXT}
+        if not active:
+            raise ConfigurationError("None of the providers in the agent's api_keys has a text model to run.")
         return active
 
     @classmethod

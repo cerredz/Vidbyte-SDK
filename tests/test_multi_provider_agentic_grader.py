@@ -24,6 +24,7 @@ Key Functions / Test Cases:
     - GraderTrialsStayOnTheirProviderTests: Assures a down provider's trial drops out instead of running on the agent's fallback model under its name.
     - ExplicitProviderKeyCheckTests: Assures resolve_active demands a provider's own key only in DIRECT mode, counting a matched key.
     - GraderStoppedTrialTests: Assures a trial stopped by its own limit is a failed trial, never a graded candidate or the run's answer.
+    - GraderFanOutFollowsTheAgentsKeysTests: Assures trials spend only on providers the agent's api_keys name, and the default grader is the agent's own priced model.
 Relations:
     Validates MultiProviderAgenticGraderAlgorithm and MultiProviderAgenticGraderRuntimeAlgorithm within the test framework.
 Similar Files:
@@ -45,7 +46,9 @@ from vidbyte.agents import AgentFallback, FallbackModel
 from vidbyte.agents.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
-from vidbyte.lib.enums import TextModelMode
+from vidbyte.lib.enums import ModelProvider, TextModelMode
+from vidbyte.lib.http import HttpResponse, HttpTransport
+from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, ProviderRequestError
 from vidbyte.middleware import ModelRetryMiddleware
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason, ProviderKeys
@@ -809,6 +812,87 @@ class GraderStoppedTrialTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.DEEPSEEK_ANSWER, grader.calls[0]["prompt"])
         self.assertIn(self.GEMINI_ANSWER, grader.calls[0]["prompt"])
         self.assertEqual(result.output, self.DEEPSEEK_ANSWER)
+
+
+class GraderFanOutFollowsTheAgentsKeysTests(unittest.IsolatedAsyncioTestCase):
+    """Trials spend only on the providers the agent's api_keys name, and the default grader is the agent's own priced model."""
+
+    # A key the matcher proves is Anthropic's, and two environment keys the agent was never given.
+    ANTHROPIC_KEY = "sk-ant-" + "api03-" + "x" * 40
+    FOREIGN_ENVIRONMENT = {"GEMINI_API_KEY": "AQ." + "g" * 40, "DEEPSEEK_API_KEY": "sk-" + "d" * 32}
+
+    def setUp(self) -> None:
+        # Start from no provider variables, then export two the agent does not hold.
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
+        os.environ.update(self.FOREIGN_ENVIRONMENT)
+
+    def test_trials_come_from_the_agents_keys_not_the_environment(self) -> None:
+        # [Silent Failure] Gemini and DeepSeek variables must not add paid trials to an Anthropic-only agent.
+        keys = ProviderKeys(providers=("anthropic",), keys=(self.ANTHROPIC_KEY,))
+
+        active = ProviderModelRegistry.resolve_active(None, None, api_keys=keys, model_mode=TextModelMode.DIRECT)
+
+        self.assertEqual(active, {"anthropic": ProviderModelRegistry.default_model(ModelProvider.ANTHROPIC)})
+
+    def test_every_provider_the_keys_name_gets_a_trial(self) -> None:
+        # [Edge Case] Two matched providers give two trials, in the registry's order.
+        keys = ProviderKeys(providers=("deepseek", "anthropic"), keys=(_DEEPSEEK_TEST_KEY, self.ANTHROPIC_KEY))
+
+        active = ProviderModelRegistry.resolve_active(None, None, api_keys=keys, model_mode=TextModelMode.DIRECT)
+
+        self.assertEqual(list(active), ["anthropic", "deepseek"])
+
+    def test_without_provider_keys_the_environment_still_decides(self) -> None:
+        # [Hidden Assumption] An agent that holds no provider key keeps the environment discovery it had before.
+        for keys in (None, ProviderKeys()):
+            with self.subTest(keys=keys):
+                active = ProviderModelRegistry.resolve_active(None, None, api_keys=keys)
+                self.assertEqual(set(active), {"gemini", "deepseek"})
+
+    def test_the_default_grader_is_the_agents_own_priced_model(self) -> None:
+        # [Silent Failure] The old default, openai:gpt-4o, had no price and needed a key the agent may not hold.
+        for config in (MultiProviderAgenticGraderAlgorithm(), ContextWindow.preset.multi_provider_agentic_grader.multi_provider_agentic_grader):
+            self.assertEqual((config.grader_provider, config.grader_model), (None, None))
+        runtime_algorithm = MultiProviderAgenticGraderRuntimeAlgorithm(MagicMock(spec=AgentRuntime, _speed_model_name=AgentRuntime._speed_model_name), MultiProviderAgenticGraderAlgorithm())
+        runner = MagicMock(_config=MagicMock(model="claude-haiku-5-5"))
+        handle = RunnerHandle(runner=runner, provider="anthropic", invoke=_invoke_runner_helper, extract_text=str, extract_metadata=lambda r: {})
+
+        provider, model = runtime_algorithm._grader_identity(handle)
+
+        self.assertEqual((provider, model), ("anthropic", "claude-haiku-5-5"))
+        self.assertIsNotNone(ModelPricingRegistry.default().resolve(ModelProvider(provider), model))
+
+    def test_one_grader_field_fills_in_the_other(self) -> None:
+        # [Edge Case] A provider alone takes its priced default; a model alone takes its provider, else openai as before.
+        by_provider = MultiProviderAgenticGraderAlgorithm(grader_provider="anthropic")
+        self.assertEqual(by_provider.grader_model, ProviderModelRegistry.default_model(ModelProvider.ANTHROPIC))
+        self.assertIsNotNone(ModelPricingRegistry.default().resolve(ModelProvider.ANTHROPIC, by_provider.grader_model))
+        self.assertEqual(MultiProviderAgenticGraderAlgorithm(grader_model="claude-sonnet-5").grader_provider, "anthropic")
+        self.assertEqual(MultiProviderAgenticGraderAlgorithm(grader_model="gpt-4.1-mini").grader_provider, "openai")
+        pair = MultiProviderAgenticGraderAlgorithm(grader_provider="deepseek", grader_model="deepseek-v4-pro")
+        self.assertEqual((pair.grader_provider, pair.grader_model), ("deepseek", "deepseek-v4-pro"))
+
+    async def test_an_anthropic_only_agent_contacts_only_anthropic_and_stays_priced(self) -> None:
+        # [Hidden Failure] End to end through the real adapters: one Anthropic trial, an Anthropic grader, nothing else.
+        hosts: list[str] = []
+
+        async def scripted(_transport: object, *, url: str, json_body: dict[str, Any] | None = None, **_: Any) -> HttpResponse:
+            hosts.append(url.split("/")[2])
+            body = {"id": "m", "type": "message", "role": "assistant", "model": (json_body or {}).get("model"), "content": [{"type": "text", "text": "Canberra."}], "stop_reason": "end_turn", "usage": {"input_tokens": 100, "output_tokens": 5}}
+            return HttpResponse(status_code=200, body=json.dumps(body), headers={"content-type": "application/json"})
+
+        with patch.object(HttpTransport, "request", scripted):
+            agent = BaseAgent(name="graded", system_prompt="Answer briefly.", max_iterations=3, algorithm=ContextWindow.preset.multi_provider_agentic_grader, provider="anthropic", model_name="claude-haiku-5-5", api_keys=[self.ANTHROPIC_KEY], model_mode=TextModelMode.DIRECT)
+            await agent.arun("Capital of Australia?")
+
+        rollup = agent.get_usage()
+        self.assertEqual(set(hosts), {"api.anthropic.com"})
+        self.assertGreaterEqual(rollup.model_call_count, 2)
+        self.assertTrue(rollup.cost_measured)
 
 
 if __name__ == "__main__":

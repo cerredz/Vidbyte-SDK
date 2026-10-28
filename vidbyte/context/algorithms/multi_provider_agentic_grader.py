@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.models import ProviderModelRegistry
@@ -38,8 +39,8 @@ class MultiProviderAgenticGraderAlgorithm:
     """Public immutable config for the Multi-Provider Agentic Grader algorithm."""
 
     provider_models: Mapping[str, str] | None = None
-    grader_provider: str = "openai"
-    grader_model: str = "gpt-4o"
+    grader_provider: str | None = None
+    grader_model: str | None = None
     agent_system_prompt: str | None = None
     grader_system_prompt: str | None = None
     grader_prompt: str | None = None
@@ -49,9 +50,20 @@ class MultiProviderAgenticGraderAlgorithm:
     def __post_init__(self) -> None:
         # Validates all configuration fields at construction time to surface errors early.
         _validate_grader_chars(self.max_grader_chars)
-        ProviderModelRegistry.validate_provider(self.grader_provider)
-        ProviderModelRegistry.validate_model(self.grader_model)
-        ProviderModelRegistry.require_openrouter_for_routed_model(self.grader_provider, self.grader_model)
+        # @intent grader-defaults-to-the-agents-own-model
+        # With neither field set the grader runs on the agent's own
+        # provider and model, which its keys reach and its spend cap
+        # prices. One field alone gets the other filled in: a provider
+        # takes its priced default model, and a model takes its
+        # catalogued provider, else the former "openai" default.
+        if self.grader_model is not None and self.grader_provider is None:
+            object.__setattr__(self, "grader_provider", ProviderModelRegistry.provider_for_model(self.grader_model) or ModelProvider.OPENAI.value)
+        if self.grader_provider is not None:
+            ProviderModelRegistry.validate_provider(self.grader_provider)
+            if self.grader_model is None:
+                object.__setattr__(self, "grader_model", ProviderModelRegistry.default_model(ModelProvider(self.grader_provider)))
+            ProviderModelRegistry.validate_model(self.grader_model)
+            ProviderModelRegistry.require_openrouter_for_routed_model(self.grader_provider, self.grader_model)
         if self.provider_models is not None:
             ProviderModelRegistry.validate_provider_models_map(self.provider_models)
         _validate_prompt_override(self.agent_system_prompt, "agent_system_prompt")
