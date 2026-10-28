@@ -1,0 +1,3 @@
+# Web search
+
+You can search the web with the {search_tool} tool. Use it when the goal needs facts that are not in the workplace, such as documentation, current information, or a reference you cannot work out yourself. Each search returns what the search provider found on the web, not anything written by the other agents. Treat the results as sources to check rather than as settled facts, and prefer the most direct and authoritative source you can find. Search before you guess when a detail matters to the result. Share what you found with the other agents by message, or write it to a file in the workplace so that everyone can read it. Do not repeat a search another agent has already reported unless you need more detail.

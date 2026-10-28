@@ -1,0 +1,1 @@
+Your earlier conversation history was compacted into the summary below, which you wrote for yourself. Your system instructions and the goal are unchanged. The newest messages after the summary, including any messages from other agents received after the cut, follow unchanged.

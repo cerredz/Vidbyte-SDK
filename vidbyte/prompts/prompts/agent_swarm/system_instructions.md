@@ -1,0 +1,3 @@
+# How to work
+
+Read the relevant files in the workplace before you write, because another agent may already have done part of the work. Tell the other agents what you are doing and what you changed, naming the files, so that their picture of the workplace stays true. When you are blocked, ask the agent who can unblock you instead of waiting in silence. Check your work with your tools: run the code, run the tests, and read back the files you wrote. Prefer small, verified steps over large unverified ones, and fix a problem as soon as you see it. Call compact when you finish a phase of work or when your history grows long, so that you keep room for what comes next. Keep your replies and messages plain and factual, and say what you have not checked.

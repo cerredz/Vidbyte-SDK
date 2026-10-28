@@ -94,7 +94,7 @@ from `vidbyte.middleware.builtins`).
 
 - `base.py`: hook base class for custom middleware.
 - `pipeline.py`: ordered hook dispatcher and decision handling.
-- `builtins/`: ready-made policy, safety, retry, budget, and compaction middleware.
+- `builtins/`: ready-made policy, safety, retry, budget, and compaction middleware. The swarm's three middleware, the turn middleware in `agent_swarm_turn.py` and the observer and trim middleware in `agent_swarm_observer.py`, are built only by `AgentSwarm` and are not re-exported from `vidbyte.middleware.builtins`.
 - `compaction/`: deterministic context and trace-backed compaction helpers.
 
 ## Related Layers

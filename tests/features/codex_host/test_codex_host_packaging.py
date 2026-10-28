@@ -247,7 +247,8 @@ class CodexHostExportTests(unittest.TestCase):
         code_search = builtin_lines.index("- Code search tools from builtins.code_search.")
         self.assertEqual(builtin_lines[code_search + 1], "- Codex host tools from builtins.codex.")
         # Row 26: CodexHostTools sorts before CodingAgentTools, and its bullet follows the CodingAgentTools one.
-        self.assertEqual(toolsets.__all__, ["CodexHostTools", "CodingAgentTools", "InfiniteMemoryAgentTools", "ParadigmMinimalToolset"])
+        # AgentSwarmTools (PR #1174) landed in the same list on its own branch and sorts first.
+        self.assertEqual(toolsets.__all__, ["AgentSwarmTools", "CodexHostTools", "CodingAgentTools", "InfiniteMemoryAgentTools", "ParadigmMinimalToolset"])
         toolset_lines = [line.strip() for line in (toolsets.__doc__ or "").splitlines()]
         coding = toolset_lines.index("- CodingAgentTools: The seven tools a CodingAgent starts with over one root folder.")
         self.assertEqual(toolset_lines[coding + 1], "- CodexHostTools: One tool per CodexHost function over one host.")

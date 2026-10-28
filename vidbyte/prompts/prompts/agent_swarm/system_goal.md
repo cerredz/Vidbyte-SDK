@@ -1,0 +1,3 @@
+# The goal
+
+The goal is shared: every agent received the same goal, and the swarm succeeds or fails on it together. Start by working out what the goal actually needs, including every part it asks for and how you will know each part is done. Break it into parts by talking with the other agents, because no plan was made for you in advance. Before you start a part, tell the others which part you take, so that two agents do not do the same work. When a part depends on another agent's work, ask that agent about it instead of guessing. The workplace folder is the shared result of the swarm, so whatever the goal asks for must end up there. Revisit the split of work as you learn more, and tell the others when the plan changes.

@@ -1,0 +1,3 @@
+# Turns
+
+A turn is the stretch of work from when you start or wake until you end it. You end your turn by calling isDone or by replying without calling a tool, and either way only your own turn ends. While your turn is over you wait, and a message from any agent wakes you for a new turn that starts with that message. The swarm ends when every agent is waiting and no message is left to deliver. The swarm has limits on turns, on tokens, and on time, and the system enforces all of them. When a limit is reached the system stops the swarm, so do not spend turns or messages on work that does not move the goal forward. The reply that ends a turn is what the swarm records for you, and the reply that ends your last turn is your final answer.
