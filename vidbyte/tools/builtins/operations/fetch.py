@@ -10,6 +10,8 @@ Architecture:
     - Firecrawl/Parallel/Tavily: per-page fetch, units from the pages returned.
     - Browserbase/Linkup: single-page fetch, a mode flag selects the billing rate.
     - DirectHttp: the SDK's own zero-cost HTTP fetcher; performs a live GET.
+    - A tool with no provider client (and Linkup, which has no SDK client yet)
+      returns an unconfigured error that declares no usage, so nothing is billed.
 Relations:
     Subclass PricedOperationTool (this package's base) and are exported through
     vidbyte/tools/builtins/operations/__init__.py.
@@ -111,12 +113,14 @@ class FirecrawlFetchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Scrapes every requested page through the injected FirecrawlClient, or prices a stub.
+        # Scrapes every requested page through the injected
+        # FirecrawlClient, or returns an unbilled unconfigured error
+        # without one.
         urls = _url_list(call)
         if not urls:
             return self._failed_result("firecrawl fetch requires a url or urls argument.", units=0, mode="scrape", attempts=0, error="missing_url")
         if self._client is None:
-            return self._contract_result("firecrawl scrape", units=len(urls), mode="scrape")
+            return self._unconfigured_result()
         try:
             payload = await self._client.scrape(urls)
         except (ProviderRequestError, ProviderResponseError):
@@ -146,14 +150,15 @@ class BrowserbaseFetchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Fetches the page through the injected BrowserbaseClient, or prices a contract stub.
+        # Fetches the page through the injected BrowserbaseClient, or
+        # returns an unbilled unconfigured error without one.
         url = str(call.arguments.get("url", ""))
         proxies = call.arguments.get("proxies") is True
         mode = "proxy" if proxies else "default"
         if not url.strip():
             return self._failed_result("browserbase fetch requires a url argument.", units=0, mode=mode, attempts=0, error="missing_url")
         if self._client is None:
-            return self._contract_result("browserbase fetch", units=1, mode=mode)
+            return self._unconfigured_result()
         try:
             payload = await self._client.fetch(url, proxies=proxies)
         except (ProviderRequestError, ProviderResponseError):
@@ -178,12 +183,14 @@ class ParallelExtractTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Extracts every requested page through the injected ParallelClient, or prices a stub.
+        # Extracts every requested page through the injected
+        # ParallelClient, or returns an unbilled unconfigured error
+        # without one.
         urls = _url_list(call)
         if not urls:
             return self._failed_result("parallel extract requires a urls argument.", units=0, mode="default", attempts=0, error="missing_url")
         if self._client is None:
-            return self._contract_result("parallel extract", units=len(urls))
+            return self._unconfigured_result()
         try:
             payload = await self._client.extract(urls)
         except (ProviderRequestError, ProviderResponseError):
@@ -209,14 +216,16 @@ class TavilyExtractTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Extracts every requested page through the injected TavilyClient, or prices a stub.
+        # Extracts every requested page through the injected
+        # TavilyClient, or returns an unbilled unconfigured error
+        # without one.
         urls = _url_list(call)
         depth = call.arguments.get("extract_depth")
         mode = depth if depth in ("basic", "advanced") else "basic"
         if not urls:
             return self._failed_result("tavily extract requires a urls argument.", units=0, mode=mode, attempts=0, error="missing_url")
         if self._client is None:
-            return self._contract_result("tavily extract", units=len(urls), mode=mode)
+            return self._unconfigured_result()
         try:
             payload = await self._client.extract(urls, extract_depth=mode)
         except (ProviderRequestError, ProviderResponseError):
@@ -242,9 +251,9 @@ class LinkupFetchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Linkup fetch at the js/nojs rate for a single page.
-        mode = "js" if call.arguments.get("render_js") is True else "nojs"
-        return self._contract_result("linkup fetch", units=1, mode=mode)
+        # The SDK has no Linkup client yet, so no fetch can be sent or
+        # billed.
+        return self._unconfigured_result()
 
 
 class DirectHttpFetchTool(PricedOperationTool):

@@ -286,6 +286,8 @@ from vidbyte.tools.builtins.operations import (
 | `OpenAlexSearchTool()` | OpenAlex | Flat per-request ($0.001) | Scholarly works search returning matching academic records. |
 | `SemanticScholarSearchTool()` | Semantic Scholar | Free | Paper search returning matching academic records from Semantic Scholar. |
 
+A tool constructed without a provider client (`client=`) sends no request and is never billed: every call returns an `unconfigured` error to the model. Brave, Browserbase, Exa, Tavily, Parallel, and Firecrawl have clients in `vidbyte.tools.builtins.operations.clients`; Linkup, OpenAlex, and Semantic Scholar have none yet.
+
 All search tools accept a `query` (or `objective` for Parallel) parameter. Exa, Parallel, and OpenAlex also accept a result count parameter controlling how many results are returned — and therefore how many units are billed.
 
 ### Fetch Tools (5)
