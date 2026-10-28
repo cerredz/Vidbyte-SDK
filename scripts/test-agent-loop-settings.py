@@ -334,19 +334,21 @@ def _make_runtime(config: AgentRuntimeConfig) -> AgentRuntime:
 
 def _test_block_renders_calculable_budgets():
     runtime = _make_runtime(AgentRuntimeConfig(max_iterations=3, max_tokens=6000, max_tool_calls=5))
-    block = runtime._render_loop_settings_block(iteration_count=1, tokens_used=100, tool_call_count=0)
-    assert "max_iterations: 1/3" in block, block
-    assert "max_tokens: 100/6000" in block, block
-    assert "max_tool_calls: 0/5" in block, block
+    block = runtime._render_loop_settings_block()
+    assert "- max_iterations: 3" in block, block
+    assert "- max_tokens: 6000" in block, block
+    assert "- max_tool_calls: 5" in block, block
+    # Live usage would change the system prompt every iteration and break replayed Claude thinking blocks.
+    assert "/" not in block, block
 
 
-run("renders calculable budgets as current/limit lines", _test_block_renders_calculable_budgets)
+run("renders calculable budgets as configured-limit lines with no live usage", _test_block_renders_calculable_budgets)
 
 
 def _test_block_excludes_unset_budgets():
     runtime = _make_runtime(AgentRuntimeConfig(max_iterations=3))
-    block = runtime._render_loop_settings_block(iteration_count=0, tokens_used=None, tool_call_count=0)
-    assert "max_iterations: 0/3" in block, block
+    block = runtime._render_loop_settings_block()
+    assert "- max_iterations: 3" in block, block
     assert "max_tokens" not in block, block
     assert "max_tool_calls" not in block, block
 
@@ -356,7 +358,7 @@ run("excludes budgets that are not configured", _test_block_excludes_unset_budge
 
 def _test_block_empty_when_no_budgets():
     runtime = _make_runtime(AgentRuntimeConfig())
-    block = runtime._render_loop_settings_block(iteration_count=0, tokens_used=None, tool_call_count=0)
+    block = runtime._render_loop_settings_block()
     assert block == "", f"expected empty block, got {block!r}"
 
 
@@ -366,9 +368,9 @@ run("renders empty block when no budgets are configured", _test_block_empty_when
 def _test_block_placed_under_system_prompt():
     runtime = _make_runtime(AgentRuntimeConfig(max_iterations=3))
     context = BaseAgentContext(system_prompt="You are a helpful assistant.")
-    block = runtime._render_loop_settings_block(iteration_count=1, tokens_used=None, tool_call_count=0)
+    block = runtime._render_loop_settings_block()
     system = runtime._build_system_string(context, loop_settings_block=block)
-    assert "max_iterations: 1/3" in system, system
+    assert "- max_iterations: 3" in system, system
     assert system.index("System prompt") < system.index("max_iterations"), system
 
 

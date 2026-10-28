@@ -401,11 +401,6 @@ class AgentRuntime:
                 tool_schemas,
                 messages,
                 state.provider,
-                iteration_count=state.iteration_count,
-                tokens_used=state.tokens_used,
-                # @intent internal-tools-never-spend-the-tool-budget
-                # The model-visible max_tool_calls usage reports the same non-internal count the budget enforces.
-                tool_call_count=len(self._non_internal_tool_contexts(state.call_contexts)),
                 caller_messages=caller_messages,
             )
             call_dispatched_at = self.speed_tracker.now()
@@ -1624,15 +1619,10 @@ class AgentRuntime:
             return str(model_name)
         return None
 
-    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, iteration_count: int = 0, tokens_used: int | None = None, tool_call_count: int = 0, caller_messages: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
+    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, caller_messages: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
         """Assemble per-iteration call options with system prompt, loop settings, primitives zone, tools, messages, prompt index, and response format."""
         call_options = dict(run_options)
-        loop_settings_block = self._render_loop_settings_block(
-            iteration_count=iteration_count,
-            tokens_used=tokens_used,
-            tool_call_count=tool_call_count,
-        )
-        system = self._build_system_string(context, loop_settings_block=loop_settings_block)
+        system = self._build_system_string(context, loop_settings_block=self._render_loop_settings_block())
         call_options.setdefault("system", system)
         if tool_schemas:
             call_options.setdefault("tools", tool_schemas)
@@ -1699,7 +1689,7 @@ class AgentRuntime:
     def _build_system_string(self, context: BaseAgentContext, *, loop_settings_block: str = "") -> str:
         """Assemble the system string with fixed header, loop settings, primitives zone, and body in order."""
         # loop_settings_block is placed directly after the fixed system-prompt header so the agent
-        # always sees its live loop budgets (current usage / configured limit) near the top of context.
+        # always sees its configured loop limits near the top of context.
         fixed = context.build_context_fixed()
         primitives_zone = "\n\n".join(zone for zone in (m.render_primitives_zone() for m in self._render_context_managers()) if zone)
         body = context.build_context_body()
@@ -1707,28 +1697,28 @@ class AgentRuntime:
         self._record_context_build_span(system_chars=len(fixed), primitive_chars=len(primitives_zone), body_chars=len(body))
         return "\n\n".join(parts)
 
-    def _render_loop_settings_block(self, *, iteration_count: int, tokens_used: int | None, tool_call_count: int) -> str:
-        """Render the agent-loop-settings context block as 'current usage / configured limit' lines.
+    def _render_loop_settings_block(self) -> str:
+        """Render the agent-loop-settings context block as one 'name: configured limit' line per budget.
 
-        Only the budgets that are both numerically calculable and tracked by the runtime loop are
-        injected (max_iterations, max_tokens, max_tool_calls). Settings without a countable
-        iteration measurement (max_retries, allowed_tools, etc.) are intentionally excluded, and
-        timeout_seconds is enforced at the budget check but kept out of model-visible prompt text.
+        Only the budgets the runtime loop enforces as counts are shown (max_iterations, max_tokens,
+        max_tool_calls); max_retries, allowed_tools and timeout_seconds stay out of model-visible text.
         Returns an empty string when no relevant budget is configured.
         """
+        # @intent loop-limits-keep-the-system-prompt-stable
+        # The block shows limits, never live usage. A system prompt
+        # that changes between iterations invalidates every replayed
+        # Claude thinking block (HTTP 400 on new Anthropic accounts)
+        # and defeats automatic prefix caching across iterations.
         lines: list[str] = []
         if self.config.max_iterations is not None:
-            lines.append(f"- max_iterations: {iteration_count}/{self.config.max_iterations}")
+            lines.append(f"- max_iterations: {self.config.max_iterations}")
         if self.config.max_tokens is not None:
-            lines.append(f"- max_tokens: {tokens_used or 0}/{self.config.max_tokens}")
+            lines.append(f"- max_tokens: {self.config.max_tokens}")
         if self.config.max_tool_calls is not None:
-            lines.append(f"- max_tool_calls: {tool_call_count}/{self.config.max_tool_calls}")
+            lines.append(f"- max_tool_calls: {self.config.max_tool_calls}")
         if not lines:
             return ""
-        header = (
-            "Below are your agent loop settings, shown as current usage / configured limit. "
-            "Stay within these limits:"
-        )
+        header = "Below are your agent loop limits for this run. The runtime enforces them and stops the run when one is reached:"
         return header + "\n" + "\n".join(lines)
 
     def _final_result(
