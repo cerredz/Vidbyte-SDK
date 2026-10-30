@@ -137,7 +137,7 @@ def run_scenario(home: Path, options: dict[str, object], scenario: dict[str, obj
 
     if mode == "auth_failure":
         emit({"type": "result", "subtype": "success", "is_error": True, "result": scenario.get("text", "Not logged in · Please run /login"), "session_id": session_id, "total_cost_usd": 0, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, "modelUsage": {}, "terminal_reason": "api_error", "api_error_status": scenario.get("status")})
-        return 1
+        return int(scenario.get("exit", 1))
     if mode == "error_result":
         emit({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": scenario.get("text", "API Error: 500 internal"), "session_id": session_id, "total_cost_usd": 0, "usage": {}, "modelUsage": {}})
         return int(scenario.get("exit", 1))

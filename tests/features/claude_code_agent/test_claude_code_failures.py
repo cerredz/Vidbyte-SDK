@@ -114,6 +114,18 @@ async def test_login_failure_is_not_authenticated(sandbox: ClaudeSandbox) -> Non
 
 
 @pytest.mark.asyncio
+async def test_failure_is_read_from_is_error_not_subtype_or_exit_code(sandbox: ClaudeSandbox) -> None:
+    # The live login failure says subtype "success"; with a clean exit,
+    # only is_error tells the run failed.
+    sandbox.scenario({"mode": "auth_failure", "exit": 0})
+
+    error = await raised(ClaudeCodeHarnessAgent(settings()))
+
+    assert error.kind is ClaudeCodeFailureKind.NOT_AUTHENTICATED
+    assert error.exit_code == 0
+
+
+@pytest.mark.asyncio
 async def test_rejected_key_status_is_not_authenticated(sandbox: ClaudeSandbox) -> None:
     sandbox.scenario({"mode": "auth_failure", "text": "API Error: request rejected", "status": 401})
 
