@@ -359,7 +359,22 @@ only when `VIDBYTE_LIVE_CLAUDE_CODE=1`.
 
 ---
 
-## 9. Rollout
+## 9. Changes outside the feature
+
+- `lint/rules/c012_provider_model_registry_validation.py`: one `_EXEMPT_FIELDS` entry for
+  `ClaudeCodeHarnessAgentSettings.model`. That is the rule's documented path for a field whose vocabulary
+  is owned outside the SDK catalog, as the Codex CLI model fields are. Claude Code resolves its own aliases
+  and third-party provider ids.
+- `tests/features/harness_threads/test_harness_threads_surface.py`: the INV-23 probe asserted that every
+  name added to `vidbyte.__all__` since the merge base is a native-harness name. That was #1036's branch
+  guard: vacuous on `main`, and it fails every later branch that adds a root export, as #1209 found for the
+  tools guard in the same file. The probe keeps its durable checks: `import vidbyte` starts no process,
+  leaves `vidbyte.harnesses.native` unloaded, and keeps main's root names in main's order. C016 and
+  `contracts/sdk-public-api.json` govern additions.
+
+---
+
+## 10. Rollout
 
 Ships in vidbyte-sdk 0.4.2 (the release pull request bumps the version). vidbyte-cli 0.3.4 imports the
 names from the root `vidbyte` package lazily and fails free on an older SDK.
