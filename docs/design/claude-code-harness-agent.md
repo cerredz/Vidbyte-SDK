@@ -189,6 +189,17 @@ which `--help` does not list but the binary defines ("Read system prompt from a 
 `--bare`'s help). The prompt and images go through stdin, so only the JSON schema is free text on argv; a
 command line that would still pass the Windows limit is refused before launch (§6.6).
 
+### 4.10 End-to-end check of the shipped command line
+
+The opt-in live test (`tests/features/claude_code_agent/test_claude_code_live.py`, two `haiku` turns through
+`ClaudeCodeHarnessAgent` itself, `ANTHROPIC_API_KEY` removed) passed on 2.1.314. That confirms the parts the
+probes did not run directly: `--system-prompt-file`, the joined `--tools=` and `--setting-sources=` (the
+wire's `init` check would have refused any tool besides `StructuredOutput`), `--safe-mode` with the OAuth
+login, `--json-schema` over stream-json, resume from the agent's own folder (the second turn recalled the
+codeword), and a per-run cost below the session total on the resumed turn. The session transcript Claude
+Code saved for that run has no hook entries. Its saved API request bodies contain neither a distinctive
+word from the user's `~/.claude/CLAUDE.md` nor the user's hook commands, so neither reached the model.
+
 ---
 
 ## 5. High-Level Design
