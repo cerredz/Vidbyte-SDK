@@ -50,6 +50,11 @@ from vidbyte.lib.enums.browser_tools import (
     BrowserToolTransport,
     BrowserToolVariable,
 )
+from vidbyte.lib.enums.claude_code import (
+    ClaudeCodeEffort,
+    ClaudeCodeFailureKind,
+    ClaudeCodeFlag,
+)
 from vidbyte.lib.enums.codex import (
     CodexAccountKind,
     CodexApprovalMode,
@@ -239,6 +244,9 @@ __all__ = [
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
+    "ClaudeCodeEffort",
+    "ClaudeCodeFailureKind",
+    "ClaudeCodeFlag",
     "CliOptionStyle",
     "CodexAccountKind",
     "CodexApprovalMode",
