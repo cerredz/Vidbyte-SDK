@@ -25,7 +25,6 @@ from vidbyte.agents.aggregation import (
     MultiProviderAggregator,
 )
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.client import AgentClient
 from vidbyte.agents.claude_code import (
     ClaudeCodeEffort,
     ClaudeCodeFailureKind,
@@ -36,6 +35,7 @@ from vidbyte.agents.claude_code import (
     ClaudeCodeRunResult,
     ClaudeCodeUsage,
 )
+from vidbyte.agents.client import AgentClient
 from vidbyte.agents.codex import (
     CodexAgentInput,
     CodexAgentSettings,

@@ -17,10 +17,10 @@ import re
 
 from vidbyte.harnesses.serialization import HarnessRedactor
 from vidbyte.lib.constants.claude_code import (
+    CLAUDE_CODE_ANTHROPIC_CREDENTIAL_SHAPE,
     CLAUDE_CODE_CREDENTIAL_VARIABLES,
     CLAUDE_CODE_FAILURE_TEXTS,
     CLAUDE_CODE_REDACTED,
-    CLAUDE_CODE_TOKEN_PATTERN,
     CLAUDE_CODE_VENDOR_TEXT_MAX_CHARS,
 )
 from vidbyte.lib.enums.claude_code import ClaudeCodeFailureKind
@@ -38,7 +38,7 @@ class ClaudeCodeFailures:
         values = {os.environ.get(name, "") for name in CLAUDE_CODE_CREDENTIAL_VARIABLES}
         self._secrets = tuple(sorted((value for value in values if value), key=len, reverse=True))
         self._redactor = HarnessRedactor()
-        self._token = re.compile(CLAUDE_CODE_TOKEN_PATTERN)
+        self._token = re.compile(CLAUDE_CODE_ANTHROPIC_CREDENTIAL_SHAPE)
 
     def failure(self, kind: ClaudeCodeFailureKind, what: str, *, session_id: str | None = None, exit_code: int | None = None, vendor_text: str = "", error_type: str = "") -> ClaudeCodeAgentError:
         # @intent every-claude-code-error-says-what-and-what-next

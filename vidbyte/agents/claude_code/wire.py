@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, TypeGuard
 
 from vidbyte.agents.claude_code.failures import ClaudeCodeFailures
 from vidbyte.lib.constants.claude_code import (
@@ -198,10 +198,12 @@ class ClaudeCodeWire:
         usage = result.get(CLAUDE_CODE_USAGE_KEY)
         if not isinstance(usage, Mapping):
             return None
-        names = (CLAUDE_CODE_INPUT_TOKENS_FIELD, CLAUDE_CODE_OUTPUT_TOKENS_FIELD, CLAUDE_CODE_CACHE_READ_FIELD, CLAUDE_CODE_CACHE_CREATION_FIELD)
-        counts = [usage.get(name) for name in names]
-        if not all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in counts):
-            return None
+        counts: list[int] = []
+        for name in (CLAUDE_CODE_INPUT_TOKENS_FIELD, CLAUDE_CODE_OUTPUT_TOKENS_FIELD, CLAUDE_CODE_CACHE_READ_FIELD, CLAUDE_CODE_CACHE_CREATION_FIELD):
+            count = usage.get(name)
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                return None
+            counts.append(count)
         input_tokens, output_tokens, cache_read, cache_creation = counts
         return ClaudeCodeUsage(input_tokens=input_tokens, output_tokens=output_tokens, cache_read_input_tokens=cache_read, cache_creation_input_tokens=cache_creation)
 
@@ -249,7 +251,7 @@ class ClaudeCodeWire:
         return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
-def _is_amount(value: object) -> bool:
+def _is_amount(value: object) -> TypeGuard[int | float]:
     # A finite, non-negative number that is not a bool.
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
 
