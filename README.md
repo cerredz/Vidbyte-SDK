@@ -101,7 +101,7 @@ pip install vidbyte-sdk
 Pin a release when reproducibility matters:
 
 ```bash
-pip install vidbyte-sdk==0.4.1
+pip install vidbyte-sdk==0.4.2
 ```
 
 Verify the installed distribution and prompt assets:
