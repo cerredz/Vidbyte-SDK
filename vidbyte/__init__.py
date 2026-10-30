@@ -20,6 +20,7 @@ Architecture:
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
     - Output exports: OutputConnector, OutputDispatcher (sends any AgentMessage to a list of connectors), the sixteen destination connectors (SlackOutput through HubSpotTaskOutput) and TypefullyPlatform, and the OutputContent, DeliveryReceipt, OutputDestination, DeliveryStatus, and OutputDeliveryError records they use.
     - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
+    - Claude Code harness exports: ClaudeCodeHarnessAgent (one Claude Code conversation on the user's machine, run through the user's own `claude` in isolated print mode), ClaudeCodeHarnessAgentSettings, ClaudeCodeRunInput, ClaudeCodeImage, ClaudeCodeRunResult, ClaudeCodeUsage, ClaudeCodeEffort, ClaudeCodeFailureKind and ClaudeCodeAgentError, so vidbyte-cli (root imports only, its lint rule C028) can run Anthropic users' turns on their own Claude Code.
     - Native harness thread exports: everything in vidbyte.harnesses.native.__all__, which is the nine run_/continue_/fork_ thread functions for Grok, opencode and Muse, their nine *_with_browser counterparts, the 22 keyless thread helpers, init_muse_workspace and the 24 command and skill functions, plus NativeThreadResult, NativeThreadSummary, NativeCommandOutput, BrowserThreadResult, BrowserToolCall, NativeThreadError, GrokThreadConfig, OpencodeThreadConfig, MuseThreadConfig, GrokPermissionMode, GrokReasoningEffort, MuseReasoningEffort, GrokThreadScope and GrokCommand. The records, enums and error import eagerly from vidbyte.lib. The functions load on first use through _LAZY_NATIVE_THREAD_EXPORTS and __getattr__, so `import vidbyte` never imports vidbyte.harnesses.native (harness thread spec INV-23). A new name in vidbyte.harnesses.native.__all__ joins that mapping (functions) or the vidbyte.lib imports (records, enums, errors) and this __all__, and then contracts/sdk-public-api.json is regenerated.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
@@ -71,6 +72,14 @@ from vidbyte.agents import (
     BaseAgent,
     CallSpeedRecord,
     CallSpeedStats,
+    ClaudeCodeEffort,
+    ClaudeCodeFailureKind,
+    ClaudeCodeHarnessAgent,
+    ClaudeCodeHarnessAgentSettings,
+    ClaudeCodeImage,
+    ClaudeCodeRunInput,
+    ClaudeCodeRunResult,
+    ClaudeCodeUsage,
     CodexAgentInput,
     CodexAgentSettings,
     CodexApprovalMode,
@@ -508,6 +517,7 @@ from vidbyte.lib.enums import (
 from vidbyte.lib.enums.config import AgentType
 from vidbyte.lib.errors import (
     AgentTransferError,
+    ClaudeCodeAgentError,
     CodexAgentError,
     ConfigurationError,
     McpAttachmentError,
@@ -1187,6 +1197,15 @@ __all__ = [
     "TradeoffContextItem",
     "BaseAgent",
     "BaseAgentContext",
+    "ClaudeCodeAgentError",
+    "ClaudeCodeEffort",
+    "ClaudeCodeFailureKind",
+    "ClaudeCodeHarnessAgent",
+    "ClaudeCodeHarnessAgentSettings",
+    "ClaudeCodeImage",
+    "ClaudeCodeRunInput",
+    "ClaudeCodeRunResult",
+    "ClaudeCodeUsage",
     "CodexAgentInput",
     "CodexAgentSettings",
     "CodexAgentError",

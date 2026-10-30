@@ -44,6 +44,7 @@ Architecture:
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
     - NativeThreadError: Raised by the Grok, opencode and Muse thread functions with a failure code, a likely cause and a next step.
+    - ClaudeCodeAgentError: Raised by ClaudeCodeHarnessAgent with a ClaudeCodeFailureKind, the session id, Claude Code's exit code, a likely cause and a next step.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
@@ -61,6 +62,7 @@ from vidbyte.lib.enums.outputs import DeliveryStatus
 if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.agents import AgentMessage
     from vidbyte.lib.dataclasses.outputs import DeliveryReceipt
+    from vidbyte.lib.enums.claude_code import ClaudeCodeFailureKind
     from vidbyte.lib.enums.failure import FailureCode
     from vidbyte.lib.enums.native_threads import (
         NativeHarness,
@@ -658,4 +660,56 @@ class NativeThreadError(AgentExecutionError):
         self.repair_approaches = (next_step,)
         self.related_docs = ("vidbyte/harnesses/README.md",)
         self.relevant_tests = ("tests/features/harness_threads",)
+        super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
+
+
+class ClaudeCodeAgentError(AgentExecutionError):
+    """Carries one ClaudeCodeHarnessAgent failure: its ClaudeCodeFailureKind, the session it ran on, Claude Code's exit code, the likely cause and the next step."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: ClaudeCodeFailureKind,
+        likely_cause: str,
+        next_step: str,
+        session_id: str | None = None,
+        exit_code: int | None = None,
+        error_type: str = "",
+    ) -> None:
+        # ClaudeCodeFailures (vidbyte/agents/claude_code/failures.py) has
+        # already composed and scrubbed the message and picked the texts
+        # written for this kind, so this class only stores them. kind is
+        # the vocabulary callers match on; session_id names the Claude
+        # Code session the run used, or None when none was started.
+        self.kind = kind
+        self.likely_cause = likely_cause
+        self.next_step = next_step
+        self.session_id = session_id
+        self.exit_code = exit_code
+        self.error_type = error_type
+        self.error_kind = f"claude_code.{kind.value}"
+        self.expected = "ClaudeCodeHarnessAgent.arun returning a ClaudeCodeRunResult"
+        self.actual = message
+        self.safe_runtime_details = {
+            "kind": kind.value,
+            "session_id": "" if session_id is None else session_id,
+            "exit_code": "" if exit_code is None else str(exit_code),
+            "error_type": error_type,
+        }
+        self.likely_causes = (likely_cause,)
+        self.repair_approaches = (next_step,)
+        self.related_docs = ("vidbyte/agents/claude_code/README.md", "docs/design/claude-code-harness-agent.md")
+        self.relevant_tests = ("tests/features/claude_code_agent",)
         super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})

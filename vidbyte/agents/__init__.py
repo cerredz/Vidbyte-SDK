@@ -25,6 +25,16 @@ from vidbyte.agents.aggregation import (
     MultiProviderAggregator,
 )
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.claude_code import (
+    ClaudeCodeEffort,
+    ClaudeCodeFailureKind,
+    ClaudeCodeHarnessAgent,
+    ClaudeCodeHarnessAgentSettings,
+    ClaudeCodeImage,
+    ClaudeCodeRunInput,
+    ClaudeCodeRunResult,
+    ClaudeCodeUsage,
+)
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.codex import (
     CodexAgentInput,
@@ -356,6 +366,14 @@ __all__ = [
     "AgentSpec",
     "AgentStopReason",
     "BaseAgent",
+    "ClaudeCodeEffort",
+    "ClaudeCodeFailureKind",
+    "ClaudeCodeHarnessAgent",
+    "ClaudeCodeHarnessAgentSettings",
+    "ClaudeCodeImage",
+    "ClaudeCodeRunInput",
+    "ClaudeCodeRunResult",
+    "ClaudeCodeUsage",
     "CodexAgentInput",
     "CodexAgentSettings",
     "CodexApprovalMode",

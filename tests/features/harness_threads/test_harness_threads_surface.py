@@ -260,8 +260,11 @@ def test_rejected_design_files_are_deleted() -> None:
 
 def test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded() -> None:
     # INV-23: a fresh `import vidbyte` starts nothing, does not import
-    # vidbyte.harnesses.native, and keeps main's root __all__, adding
-    # only native names.
+    # vidbyte.harnesses.native, and keeps main's root __all__ in order.
+    # Which names a branch adds is not checked here: that was #1036's
+    # branch guard, vacuous on main and failing every later branch that
+    # adds a root export (as #1209 found for its tools guard); C016 and
+    # contracts/sdk-public-api.json govern additions.
     probe = textwrap.dedent(
         """
         import json, subprocess, sys
@@ -282,8 +285,6 @@ def test_import_vidbyte_starts_no_process_and_leaves_the_native_package_unloaded
     assert report["started"] == [] and report["native"] is False
     base = optional_merge_base()
     if base is not None:
-        # Main's names keep their order, and the only additions are the
-        # native names the root re-exports for vidbyte-cli.
+        # Main's names are all still there, in main's order.
         before = literal_all(git("show", f"{base}:vidbyte/__init__.py").stdout)
         assert [name for name in report["all"] if name in before] == before
-        assert set(report["all"]) - set(before) <= set(importlib.import_module("vidbyte.harnesses.native").__all__)
