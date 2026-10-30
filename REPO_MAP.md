@@ -76,6 +76,10 @@ Executable agent actors and the logic that selects how they run — the primitiv
 
 Reusable multi-agent reasoning strategies packaged as ready-to-use agent behaviors rather than one-off scripts. Each strategy is an opinionated composition of existing agent primitives — critique-and-revise cycles, independent critique, adversarial multi-role evaluation, and grading across several model providers are among the patterns covered. None of these introduce a new primitive; they combine what already exists into a named, reusable shape. This is the folder to check before hand-wiring a custom critic or review loop from scratch.
 
+##### `vidbyte/agents/claude_code/`
+
+An agent object that is one Claude Code conversation on the user's own machine, the Anthropic counterpart of the Codex-backed agent for callers whose users bring their own model account. The first run starts a session in Claude Code's non-interactive mode and every later run on the same object resumes it, each run being one short-lived `claude` process started through the shared process helpers, with the prompt and images on standard input and the instructions in a private file. Every run is isolated from the user's hooks, plugins, MCP servers, skills and memory files, and turns Claude Code's output into one typed result or one error with a closed failure kind. Its records, enums, wire keys and error live lower in the shared substrate, as the placement rules require.
+
 ##### `vidbyte/agents/contracts/`
 
 The invariants an agent's configuration must satisfy before it is allowed to run. This spans both the shape a structured output must conform to and the minimum acceptable settings below which a configuration is considered actively misconfigured rather than merely unusual. The folder is small, but its effect is outsized: it turns a bad configuration into an error raised at construction time instead of a confusing failure partway through a run. Anyone adding a new class of agent configuration should consider whether it needs a floor defined here.

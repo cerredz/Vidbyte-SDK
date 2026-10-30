@@ -477,6 +477,7 @@ their sources, are in "Reasoning Effort Sources" in
 - `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
+- `claude_code/`: `ClaudeCodeHarnessAgent`, one Claude Code conversation on the user's machine: the first `arun` starts a print-mode session, later ones resume it, every turn runs the user's own `claude` (isolated from their hooks, plugins, MCP servers and CLAUDE.md) so Anthropic bills the user, and failures are one `ClaudeCodeAgentError` with a `ClaudeCodeFailureKind`. See its [README](claude_code/README.md).
 - `coding.py`: `CodingAgent`, a `BaseAgent` preloaded with bash, read, write, edit, glob, grep, and one web-fetch tool over one root folder; its checks live in `CodingAgentSettings` and its tools in `CodingAgentTools`.
 - `infinite/`: `InfiniteMemoryAgent`, a root agent that delegates work to generator and verifier subagent pairs through `launch_subagent` and keeps memory in one guarded workspace folder; resumable from its run journal; streams typed run events and builds a deterministic run handoff.
 - `coding_context/`: `CodingContextWindow` and one loader per section (`AgentsMdLoader`), which build the context a `CodingAgent` shows after its system prompt.

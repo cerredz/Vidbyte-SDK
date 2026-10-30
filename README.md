@@ -1001,6 +1001,27 @@ agent = Agent(
 )
 ```
 
+### Claude Code Harness Agent
+
+`ClaudeCodeHarnessAgent` runs turns on the Claude Code installed on the user's machine, under the user's own Claude login or API key, so Anthropic bills the user's account directly. The agent object is one conversation: the first `arun` starts a Claude Code session, every later `arun` resumes it. No extra package is needed, only a signed-in `claude` on `PATH`.
+
+```python
+from vidbyte import ClaudeCodeHarnessAgent, ClaudeCodeHarnessAgentSettings, ClaudeCodeRunInput
+
+agent = ClaudeCodeHarnessAgent(
+    ClaudeCodeHarnessAgentSettings(
+        name="advisor",
+        instructions="You are a careful reviewer. Answer through the structured output.",
+        model="sonnet",
+        output_schema={"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]},
+    )
+)
+result = await agent.arun(ClaudeCodeRunInput(prompt="Is this plan sound? ..."))
+print(result.output["verdict"], result.session_id, result.usage.output_tokens, result.cost_usd, result.model)
+```
+
+Each run is isolated from the user's hooks, plugins, MCP servers, skills and CLAUDE.md files, uses no built-in tool unless `allowed_tools` names it, accepts png, jpeg, gif and webp images, and raises one `ClaudeCodeAgentError` with a `ClaudeCodeFailureKind` (`NOT_INSTALLED`, `NOT_AUTHENTICATED`, `TIMEOUT`, `EXIT_NONZERO`, `SCHEMA_VIOLATION`, `UNSUPPORTED_INPUT`, `MALFORMED_OUTPUT`) whose message says what to do next. See [`vidbyte/agents/claude_code/README.md`](vidbyte/agents/claude_code/README.md).
+
 ### Continual Trace Agent
 
 For a structured, continually-updated handoff artifact, pass
