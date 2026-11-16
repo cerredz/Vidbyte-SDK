@@ -122,8 +122,8 @@ class DecisionConfigTests(unittest.TestCase):
     def test_managed_endpoint_is_fixed_and_custom_urls_are_rejected(self) -> None:
         # [Hidden Assumption] No managed config may redirect its bearer credential to caller-selected hosts.
         config = DecisionModelConfig.vidbyte_managed()
-        self.assertEqual(config.resolved_endpoint(), "https://vidbyte-backend.onrender.com/api/v1/models/typesafe")
-        for endpoint in ("https://attacker.example", "https://vidbyte-backend.onrender.com/other", object()):
+        self.assertEqual(config.resolved_endpoint(), "https://api.vidbyte.pro/api/v1/models/typesafe")
+        for endpoint in ("https://attacker.example", "https://api.vidbyte.pro/other", object()):
             with self.subTest(endpoint=endpoint), self.assertRaises(ConfigurationError):
                 DecisionModelConfig(mode=DecisionModelMode.VIDBYTE_MANAGED, endpoint=endpoint)  # type: ignore[arg-type]
 
@@ -163,7 +163,7 @@ class ManagedTransportTests(unittest.IsolatedAsyncioTestCase):
             result = await DecisionModelRunner(DecisionModelConfig.vidbyte_managed(), transport=transport).arun(decision_request())
         sent = transport.requests[0]
         self.assertEqual(result.answer("decision").noul, 0.9)
-        self.assertEqual(sent["url"], "https://vidbyte-backend.onrender.com/api/v1/models/typesafe/systemone")
+        self.assertEqual(sent["url"], "https://api.vidbyte.pro/api/v1/models/typesafe/systemone")
         self.assertEqual(sent["headers"]["authorization"], f"Bearer {VIDBYTE_KEY}")
 
     async def test_model_listing_uses_product_models_route(self) -> None:
@@ -172,7 +172,7 @@ class ManagedTransportTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {"VIDBYTE_API_KEY": VIDBYTE_KEY}, clear=True):
             models = await DecisionModelRunner(DecisionModelConfig.vidbyte_managed(), transport=transport).alist_models()
         self.assertEqual(models, ())
-        self.assertEqual(transport.requests[0]["url"], "https://vidbyte-backend.onrender.com/api/v1/models/typesafe/models")
+        self.assertEqual(transport.requests[0]["url"], "https://api.vidbyte.pro/api/v1/models/typesafe/models")
 
     async def test_managed_access_errors_keep_status_and_drop_echoed_credentials(self) -> None:
         # [Hidden Failure] A gateway response that repeats the bearer key must not disclose it in an exception.

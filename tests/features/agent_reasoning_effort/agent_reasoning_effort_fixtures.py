@@ -222,7 +222,7 @@ GATEWAY_PROVIDERS: tuple[str, ...] = (
     "xai",
 )
 
-GATEWAY_URL = "https://vidbyte-backend.onrender.com/api/v1/models/generate"
+GATEWAY_URL = "https://api.vidbyte.pro/api/v1/models/generate"
 REGISTRIES_README_POINTER = (
     '(see "Reasoning Effort Sources" in vidbyte/lib/registries/README.md)'
 )
