@@ -24,9 +24,10 @@ JEV_PREVIEW_MODEL: str = "jev-preview"
 JEV_VERSIONED_MODEL_ID: re.Pattern[str] = re.compile(r"jev-\d+\.\d+\.\d+")
 JEV_SYSTEMONE_PATH: str = "/systemone"
 JEV_MODELS_PATH: str = "/models"
-# The managed gateway must sit on a host the platform contract marks `live`; `api.vidbyte.pro` is
-# still `planned` and does not resolve, so managed checks sent there all failed as unavailable.
-VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://vidbyte-backend.onrender.com/api/v1/models/typesafe"
+# The managed gateway sits on Vidbyte's own domain, never a hosting provider's: the Render host
+# (`vidbyte-backend.onrender.com`) died when the backend moved to Vercel, which serves `api.vidbyte.pro`.
+# The platform contract must mark this origin `live` (lint C018), or every managed check fails as unavailable.
+VIDBYTE_JEV_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/typesafe"
 VIDBYTE_MANAGED_CREDENTIAL_ERROR_KIND: str = "vidbyte_managed_credentials"
 
 # Documented vendor limits (https://docs.typesafe.ai/api.md#question-types).
@@ -69,9 +70,10 @@ VIDBYTE_API_KEY_PATTERN: str = rf"{re.escape(VIDBYTE_API_KEY_PREFIX)}[A-Za-z0-9_
 # The one wording of the error for a key that fails the pattern (M-10).
 VIDBYTE_API_KEY_FORMAT_MESSAGE: str = f"The managed Vidbyte API key must be a live key in the {VIDBYTE_API_KEY_PREFIX} format."
 VIDBYTE_API_KEY_ENV_VAR: str = "VIDBYTE_API_KEY"
-# The one generative route, on the contract's live host (C018), which
-# every managed text call posts to whatever its provider.
-VIDBYTE_GENERATIVE_GATEWAY_ENDPOINT: str = "https://vidbyte-backend.onrender.com/api/v1/models/generate"
+# The one generative route, on the same Vidbyte-owned host as the Jev
+# gateway (live in the contract, C018), which every managed text call
+# posts to whatever its provider.
+VIDBYTE_GENERATIVE_GATEWAY_ENDPOINT: str = "https://api.vidbyte.pro/api/v1/models/generate"
 # The six providers the generative gateway dispatches: cerredz/Vidbyte
 # backend spec r3 section 9.2.8 at commit a14b37e7e (spec.md A-1).
 VIDBYTE_MANAGED_TEXT_PROVIDERS: frozenset[ModelProvider] = frozenset({

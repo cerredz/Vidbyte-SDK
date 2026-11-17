@@ -30,7 +30,7 @@ LEAKED_KEY = "vb_live_" + "L" * 32
 BODY_CANARY = "canary-7f3a9c"
 
 # The one gateway route (spec section 4, INV-1), spelled as a literal so a changed constant is caught.
-GATEWAY_URL = "https://vidbyte-backend.onrender.com/api/v1/models/generate"
+GATEWAY_URL = "https://api.vidbyte.pro/api/v1/models/generate"
 # Where the retry wait is looked up (spec section 13).
 SLEEP_TARGET = "vidbyte.lib.http.vidbyte_gateway.asyncio.sleep"
 # Where TextModelRunner looks up its default transport class (spec section 13).
