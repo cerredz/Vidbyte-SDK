@@ -6,7 +6,7 @@ SDK callers configure iteration, tool-call, context, and timeout limits before r
 
 ## Contract
 
-Optional loop count limits are positive integers (never booleans); retry counts may also be zero where supported. Loop and tool-call timeouts are finite positive numbers, and retry backoff is finite with its documented minimum. Invalid input raises an SDK `ConfigurationError` naming the field. Valid settings preserve their exact values in the runtime configuration.
+Optional loop count limits are positive integers (never booleans); retry counts may also be zero where supported. Loop and tool-call timeouts are finite positive numbers, and retry backoff is finite with its documented minimum. Invalid input raises an SDK `ConfigurationError` naming the field. Valid settings preserve their exact values in the runtime configuration. When a tool-result character limit is set, the full model-visible output, notice included, stays within it; metadata reports the original payload size and the number of payload characters retained or omitted.
 
 ## Actors / Callers
 
@@ -34,15 +34,15 @@ None: the tests run offline without model runners or provider credentials.
 
 ## Known Failure Modes
 
-Python's `bool` is an `int`; positive floats compare greater than zero; strings raise a raw TypeError when compared with an integer; NaN bypasses ordered comparisons.
+Python's `bool` is an `int`; positive floats compare greater than zero; strings raise a raw TypeError when compared with an integer; NaN bypasses ordered comparisons. A truncation notice appended after slicing can exceed the requested output cap, especially for tiny caps.
 
 ## Historical Regressions
 
-The first bug-hunt pass found the above four failure mechanisms in the public constructor. A later pass found that a `MinToolCalls` or `MinSuccessfulToolCalls` floor at or above a tool-call budget given only as `ToolSettings.max_calls` was accepted, although the run stops at that budget; the floor < ceiling check now reads that budget too. Another pass found that a `MinToolCallsById` floor equal to its `ToolSettings.max_calls_per_tool` cap was rejected as unreachable, although a per-tool cap only denies the next call and never stops the run; only a floor above the cap is now rejected. A further pass found that a `MinIterations` floor equal to `max_iterations` was rejected as unreachable, although the iteration budget is checked before an iteration starts and the floor after that iteration's model call, so the model can finish in the last allowed iteration; only a floor above `max_iterations` is now rejected. A later pass found that a `MinToolCallsById` or `MinDistinctTools` floor at or above the global tool-call budget (`max_tool_calls` or `ToolSettings.max_calls`) was accepted, although each needs that many tool calls and the run stops at the budget; both now get the same floor < ceiling check as `MinToolCalls`.
+The first bug-hunt pass found the above four failure mechanisms in the public constructor. A later pass found that a `MinToolCalls` or `MinSuccessfulToolCalls` floor at or above a tool-call budget given only as `ToolSettings.max_calls` was accepted, although the run stops at that budget; the floor < ceiling check now reads that budget too. Another pass found that a `MinToolCallsById` floor equal to its `ToolSettings.max_calls_per_tool` cap was rejected as unreachable, although a per-tool cap only denies the next call and never stops the run; only a floor above the cap is now rejected. A further pass found that a `MinIterations` floor equal to `max_iterations` was rejected as unreachable, although the iteration budget is checked before an iteration starts and the floor after that iteration's model call, so the model can finish in the last allowed iteration; only a floor above `max_iterations` is now rejected. A later pass found that a `MinToolCallsById` or `MinDistinctTools` floor at or above the global tool-call budget (`max_tool_calls` or `ToolSettings.max_calls`) was accepted, although each needs that many tool calls and the run stops at the budget; both now get the same floor < ceiling check as `MinToolCalls`. A consumer probe found `result_max_chars=5` returned 71 model-visible characters because a truncation notice was appended after slicing the payload.
 
 ## Test Suite Map
 
-`test_contract.py` covers every integer field, valid conversion, malformed types, loop and tool-call timeout boundaries, and nested tool retry settings. Run with `python -m pytest -q tests/features/sdk_loop_settings`.
+`test_contract.py` covers every integer field, valid conversion, malformed types, loop and tool-call timeout boundaries, and nested tool retry settings. `test_tool_result_cap.py` covers the tool result transformation, exact boundary, tiny caps, and accounting metadata. Run with `python -m pytest -q tests/features/sdk_loop_settings`.
 
 ## Omitted Testing Strategies
 
