@@ -65,18 +65,22 @@ class ToolSettings:
         # Returns a model-visible result capped to result_max_chars; callers keep the raw ToolResult.
         if self.result_max_chars is None or len(result.output) <= self.result_max_chars:
             return result
-        omitted = len(result.output) - self.result_max_chars
-        suffix = f"\n...[tool output truncated by ToolSettings: omitted {omitted} characters]"
+        # Reserve room for the notice so the actual text sent to the model obeys the cap.
+        suffix = "\n...[tool output truncated by ToolSettings]"
+        if self.result_max_chars < len(suffix):
+            suffix = "..."[: self.result_max_chars]
+        visible_chars = self.result_max_chars - len(suffix)
+        output = result.output[:visible_chars] + suffix
         return ToolResult(
             tool_name=result.tool_name,
             status=result.status,
-            output=result.output[: self.result_max_chars] + suffix,
+            output=output,
             metadata={
                 **dict(result.metadata),
                 "tool_settings_truncated": True,
                 "original_chars": len(result.output),
-                "visible_chars": self.result_max_chars,
-                "truncated_chars": omitted,
+                "visible_chars": visible_chars,
+                "truncated_chars": len(result.output) - visible_chars,
             },
         )
 

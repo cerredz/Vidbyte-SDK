@@ -21,6 +21,7 @@ It is not a home for middleware policy implementations, provider fixtures, or Je
 - `README.md` describes why offline boundary tests live here and routes future probes to the owning production layers.
 - `FEATURE.md` records the contract, known failure mechanisms, and which test strategies are intentionally omitted.
 - `test_contract.py` probes accepted and rejected loop limits through the public constructor and the generated runtime config. Open this first when a settings input passes validation but cannot be enforced as intended.
+- `test_tool_result_cap.py` checks that a truncated tool result and its notice fit the configured character cap while metadata still counts the raw payload accurately.
 
 ## Logs
 
@@ -29,3 +30,4 @@ It is not a home for middleware policy implementations, provider fixtures, or Je
 - 2026-10-07 - ToolErrorPolicy accepted boolean and fractional retry counts and infinite backoff parameters; include retry policy when probing settings limits.
 - 2026-10-10 - allowed_tools accepted a bare string (the ("search") one-tuple typo) and unstripped names, silently denying the intended tool - validate it like ToolSettings.denied_tools.
 - 2026-10-10 - ToolErrorPolicy.retry_on accepted a bare string (the ("timeout") one-tuple typo), so timed-out tool calls never retried - reject it like the other name lists.
+- 2026-11-19 - A tool-result cap sliced the payload but appended a longer notice, so the model still saw more than the configured limit.
